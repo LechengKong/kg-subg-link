@@ -19,6 +19,7 @@ class Evaluator():
     def eval(self, save=False):
         # print("eval")
         mrr_scores = []
+        h10_scores = []
         if save:
             dataloader = DataLoader(self.data, batch_size=self.params.val_batch_size, num_workers=self.params.num_workers, collate_fn=self.params.collate_fn_val, prefetch_factor=self.params.prefetch_val, pin_memory=True)
             num_batches = len(dataloader)
@@ -42,14 +43,19 @@ class Evaluator():
                     score_pos = self.graph_classifier(data_pos)
                     scores = score_pos.view(len(targets_pos), -1)
                     scores = scores.cpu().numpy()
+                    (b_size, dim_size) = scores.shape
                     if save:
                         all_scores[self.params.val_batch_size*batch_count:self.params.val_batch_size*(batch_count+1),:]= scores
                     else:
                         tp = targets_pos.cpu().numpy()
 
                         true_labels = np.zeros(scores.shape)
-                        true_labels[np.arange(len(targets_pos)), tp] = 1
+                        true_labels[np.arange(b_size), tp] = 1
 
+                        ranking = np.argsort(scores, axis=1)
+                        h10_ranking = ranking[:,10:]
+                        true_ranking = np.sum(h10_ranking==tp[:,np.newaxis], axis=1)
+                        h10_scores.append(np.mean(true_ranking))
                         mrr_scores.append(metrics.label_ranking_average_precision_score(true_labels, scores))
                 except RuntimeError:
                     print("oom")
@@ -79,4 +85,9 @@ class Evaluator():
                 mrr += v
             if len(mrr_scores)!=0:
                 mrr /= len(mrr_scores)
-            return {'mrr': mrr}
+            h10 = 0
+            for v in h10_scores:
+                h10+=v
+            if len(h10_scores)!=0:
+                h10 /= len(h10_scores)
+            return {'mrr': mrr, 'h10': h10}

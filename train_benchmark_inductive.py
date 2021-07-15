@@ -16,11 +16,12 @@ class Mem:
     def __init__(self):
         self.hop = 3
         self.enclosing_sub_graph = False
-        self.max_nodes_per_hop = 40
+        self.max_nodes_per_hop = 30
         self.num_neg_samples_per_link = 2
         self.root_path = "/project/tantra/jerry.kong/ogb_project/ogb-grail-mod/data"
         self.data_path = "/project/tantra/jerry.kong/ogb_project/ogb-grail-mod/data"
-        self.data_set = "WN18RR"
+        self.data_set = "WN18RR_v1"
+        self.ind_data_set = "WN18RR_v1_ind"
         self.num_rels = 1315
         self.rel_emb_dim = 48
         self.add_ht_emb = True
@@ -40,12 +41,12 @@ class Mem:
         self.lr = 0.0001
         self.l2 = 1e-3
         self.batch_size = 16
-        self.num_workers = 16
+        self.num_workers = 8
         self.num_epochs = 20
         self.save_every = 1
         self.margin = 5
         self.train_edges = 10000
-        self.val_size = 500
+        self.val_size = 1000
         self.eval_every_iter = 1
         self.early_stop = 5
         self.split = 'val'
@@ -86,9 +87,19 @@ if __name__ == '__main__':
         files[f] = osp.join(database_path,f'{f}.txt')
 
     adj_list, converted_triplets, entity2id, relation2id, id2entity, id2relation = process_files(files)
-    params.num_entities = len(entity2id)
-    params.num_rels = len(relation2id)
-    print(f'Dataset {params.data_set} has {params.num_entities} entities and {params.num_rels} relations')
+    train_num_entities = len(entity2id)
+    train_num_rel = len(relation2id)
+    print(f'Dataset {params.data_set} has {train_num_entities} entities and {train_num_rel} relations')
+
+    ind_database_path = osp.join(params.data_path, params.ind_data_set)
+    files = {}
+    for f in params.use_data:
+        files[f] = osp.join(ind_database_path,f'{f}.txt')
+
+    adj_list_ind, converted_triplets_ind, entity2id_ind, relation2id_ind, id2entity_ind, id2relation_ind = process_files(files, relation2id=relation2id)
+    ind_num_entities = len(entity2id_ind)
+    ind_num_rel = len(relation2id_ind)
+    print(f'Dataset {params.ind_data_set} has {ind_num_entities} entities and {ind_num_rel} relations')
 
     params.collate_fn = collate_dgl
     params.collate_fn_val = collate_dgl_val
@@ -96,8 +107,8 @@ if __name__ == '__main__':
     params.move_batch_to_device_val = move_batch_to_device_dgl_val
     torch.multiprocessing.set_sharing_strategy('file_system')
 
-    train = SubgraphDatasetTrain(converted_triplets['train'], params, adj_list, params.num_rels, params.num_entities, neg_link_per_sample=25)
-    val = SubgraphDatasetVal(converted_triplets, 'valid', params, adj_list, params.num_rels, params.num_entities, graph=train.graph, neg_link_per_sample=25)
+    train = SubgraphDatasetTrain(converted_triplets['train'], params, adj_list, train_num_rel, train_num_entities, neg_link_per_sample=10)
+    val = SubgraphDatasetVal(converted_triplets_ind, 'valid', params, adj_list_ind, ind_num_rel, ind_num_entities, neg_link_per_sample=25)
     params.inp_dim = train.n_feat_dim
     graph_classifier = dgl_model(params, relation2id).to(device=params.device)
 

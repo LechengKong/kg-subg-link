@@ -43,7 +43,7 @@ class SubgraphDatasetTrain(Dataset):
         nodes = [link[0] for link in neg_links] + [link[2] for link in neg_links] + [pos_link[0], pos_link[2]]
         node_set = set(nodes)
         logging.debug(f'prepare nodes:{time.time()-st}')
-        sample_nodes = extract_neighbor_nodes(node_set, self.adj_mat, h=self.params.hop, max_nodes_per_hop=10000)
+        sample_nodes = extract_neighbor_nodes(node_set, self.adj_mat, h=self.params.hop, max_nodes_per_hop=500)
         sample_nodes = list(node_set) + list(sample_nodes)
         logging.debug(f'sample nodes:{time.time()-st}')
         main_subgraph = self.graph.subgraph(sample_nodes)
@@ -105,15 +105,17 @@ class SubgraphDatasetTrain(Dataset):
 
 
 class SubgraphDatasetVal(Dataset):
-    def __init__(self, triplets, params, adj_list, num_rels, num_entities, neg_link_per_sample=1):
-        self.edges = triplets
+    def __init__(self, triplets, dataset, params, adj_list, num_rels, num_entities, graph=None, neg_link_per_sample=1):
+        self.edges = triplets[dataset]
         self.adj_list = adj_list
         self.coo_adj_list = [adj.tocoo() for adj in self.adj_list]
         self.num_edges = len(self.edges)
         self.num_nodes = num_entities
         self.num_rels = num_rels
         self.params = params
-        self.graph = construct_graph_from_edges(self.edges.T, self.num_nodes)
+        self.graph = graph
+        if self.graph is None:
+            self.graph = construct_graph_from_edges(triplets[dataset].T, self.num_nodes)
         self.adj_mat = self.graph.adjacency_matrix(transpose=False, scipy_fmt='csr')
         self.adj_mat += self.adj_mat.T
 
@@ -137,7 +139,7 @@ class SubgraphDatasetVal(Dataset):
         neg_links = neg_tail_links+neg_head_links
         nodes = [link[0] for link in neg_links] + [link[2] for link in neg_links] + [pos_link[0], pos_link[2]]
         node_set = set(nodes)
-        sample_nodes = extract_neighbor_nodes(node_set, self.adj_mat, h=self.params.hop, max_nodes_per_hop=10000)
+        sample_nodes = extract_neighbor_nodes(node_set, self.adj_mat, h=self.params.hop, max_nodes_per_hop=2500)
         sample_nodes = list(node_set) + list(sample_nodes)
         main_subgraph = self.graph.subgraph(sample_nodes)
         main_subgraph.edata['type'] = self.graph.edata['type'][main_subgraph.edata[dgl.EID]]
@@ -147,8 +149,10 @@ class SubgraphDatasetVal(Dataset):
         node_to_id = {pid: i for i, pid in enumerate(p_id)}
         can_edges = [pos_link]+neg_links
         graphs = []
-        for edge in can_edges:
+        for i, edge in enumerate(can_edges):
             pos_nodes, pos_label, _, _, _ = subgraph_extraction_labeling_wiki([node_to_id[edge[0]], node_to_id[edge[2]]], rel, local_adj_mat, h=self.params.hop, max_nodes_per_hop=self.params.max_nodes_per_hop)
+            # if i == 0 and len(pos_nodes)==2:
+            #     print(index)
             pos_subgraph = main_subgraph.subgraph(pos_nodes)
             pos_subgraph.edata['type'] = main_subgraph.edata['type'][pos_subgraph.edata[dgl.EID]]
             pos_subgraph.edata['label'] = torch.tensor(rel * np.ones(pos_subgraph.edata['type'].shape),

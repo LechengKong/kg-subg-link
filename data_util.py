@@ -1,19 +1,20 @@
 import numpy as np
 from scipy.sparse import csr_matrix
 
-def process_files(files):
+def process_files(files, relation2id=None):
     '''
     files: Dictionary map of file paths to read the triplets from.
     saved_relation2id: Saved relation2id (mostly passed from a trained model) which can be used to map relations to pre-defined indices and filter out the unknown ones.
     '''
     entity2id = {}
-    relation2id = {}
+    if relation2id is None:
+        relation2id = {}
 
     converted_triplets = {}
-    rel_list = []
+    rel_list = [[] for i in range(len(relation2id))]
 
     ent = 0
-    rel = 0
+    rel = len(relation2id)
 
     for file_type, file_path in files.items():
 
@@ -34,7 +35,6 @@ def process_files(files):
                 rel_list.append([])
 
             data.append([entity2id[triplet[0]], relation2id[triplet[1]], entity2id[triplet[2]]])
-            rel_list[relation2id[triplet[1]]].append([entity2id[triplet[0]], entity2id[triplet[2]]])
         
         if file_type == "train":
             for trip in data:
@@ -48,6 +48,9 @@ def process_files(files):
     adj_list = []
     for rel_mat in rel_list:
         rel_array = np.array(rel_mat)
-        adj_list.append(csr_matrix((np.ones(len(rel_mat)),(rel_array[:,0],rel_array[:,1])), shape=(len(entity2id),len(entity2id))))
+        if len(rel_array)==0:
+            adj_list.append(csr_matrix((len(entity2id),len(entity2id))))
+        else:
+            adj_list.append(csr_matrix((np.ones(len(rel_mat)),(rel_array[:,0],rel_array[:,1])), shape=(len(entity2id),len(entity2id))))
 
     return adj_list, converted_triplets, entity2id, relation2id, id2entity, id2relation
