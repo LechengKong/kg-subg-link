@@ -97,7 +97,7 @@ if __name__ == '__main__':
     torch.multiprocessing.set_sharing_strategy('file_system')
 
     train = SubgraphDatasetTrain(converted_triplets['train'], params, adj_list, params.num_rels, params.num_entities, neg_link_per_sample=10)
-    val = SubgraphDatasetVal(converted_triplets['valid'], params, adj_list, params.num_rels, params.num_entities, neg_link_per_sample=500)
+    val = SubgraphDatasetVal(converted_triplets['valid'], params, adj_list, params.num_rels, params.num_entities, neg_link_per_sample=25)
     params.inp_dim = train.n_feat_dim
     graph_classifier = dgl_model(params, relation2id).to(device=params.device)
 
