@@ -5,7 +5,7 @@ import os.path as osp
 import logging
 
 from data_util import process_files
-from datasets import SubgraphDatasetTrain, SubgraphDatasetVal
+from datasets import SubgraphDatasetTrain, SubgraphDatasetVal, SubgraphDatasetContextTrain, SubgraphDatasetContextVal
 from torch_util import collate_dgl, collate_dgl_val, move_batch_to_device_dgl, move_batch_to_device_dgl_val
 from model.dgl.graph_classifier import GraphClassifier as dgl_model
 from managers.trainer import Trainer
@@ -20,8 +20,8 @@ class Mem:
         self.num_neg_samples_per_link = 2
         self.root_path = "/project/tantra/jerry.kong/ogb_project/ogb-grail-mod/data"
         self.data_path = "/project/tantra/jerry.kong/ogb_project/ogb-grail-mod/data"
-        self.data_set = "WN18RR_v1"
-        self.ind_data_set = "WN18RR_v1_ind"
+        self.data_set = "WN18RR_v3"
+        self.ind_data_set = "WN18RR_v3_ind"
         self.num_rels = 1315
         self.rel_emb_dim = 48
         self.add_ht_emb = True
@@ -44,9 +44,9 @@ class Mem:
         self.num_workers = 8
         self.num_epochs = 20
         self.save_every = 1
-        self.margin = 5
-        self.train_edges = 10000
-        self.val_size = 1000
+        self.margin = 10
+        self.train_edges = 25901
+        self.val_size = 3097
         self.eval_every_iter = 1
         self.early_stop = 5
         self.split = 'val'
@@ -56,7 +56,7 @@ class Mem:
         self.prefetch_val = 2
         self.retrain = False
         self.retrain_seed = 111
-        self.model_name = "graph_classifier_from_val_3hop_sm"
+        self.model_name = "graph_classifier_context_ind"
         self.feat_size = 768
         self.use_data = ["train", "test", "valid"]
         self.device = torch.device('cpu')
@@ -107,8 +107,8 @@ if __name__ == '__main__':
     params.move_batch_to_device_val = move_batch_to_device_dgl_val
     torch.multiprocessing.set_sharing_strategy('file_system')
 
-    train = SubgraphDatasetTrain(converted_triplets['train'], params, adj_list, train_num_rel, train_num_entities, neg_link_per_sample=10)
-    val = SubgraphDatasetVal(converted_triplets_ind, 'valid', params, adj_list_ind, ind_num_rel, ind_num_entities, neg_link_per_sample=25)
+    train = SubgraphDatasetContextTrain(converted_triplets, params, adj_list, train_num_rel, train_num_entities, neg_link_per_sample=25)
+    val = SubgraphDatasetContextVal(converted_triplets_ind, 'valid', params, adj_list_ind, ind_num_rel, ind_num_entities, neg_link_per_sample=50)
     params.inp_dim = train.n_feat_dim
     graph_classifier = dgl_model(params, relation2id).to(device=params.device)
 

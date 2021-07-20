@@ -2,12 +2,14 @@ import numpy as np
 import scipy.sparse as ssp
 import torch
 import dgl
+import random
 
 
-def sample_neg_link(adj, head, tail, num_nodes, sample_size):
+def sample_neg_link(adj, rel, head, tail, num_nodes, sample_size):
     arr = np.arange(num_nodes)
-    neg_head_neighbor = adj.col[adj.row==head]
-    neg_tail_neighbor = adj.row[adj.col==tail]
+    cur_adj = adj[rel]
+    neg_head_neighbor = cur_adj.col[cur_adj.row==head]
+    neg_tail_neighbor = cur_adj.row[cur_adj.col==tail]
     cans = set(arr)
     tail_cans = cans.difference(neg_head_neighbor)
     head_cans = cans.difference(neg_tail_neighbor)
@@ -17,7 +19,11 @@ def sample_neg_link(adj, head, tail, num_nodes, sample_size):
     # print(tail_cans)
     tail_sample = np.random.choice(tail_can_arr, sample_size, replace = False)
     head_sample = np.random.choice(head_can_arr, sample_size, replace = False)
-    return tail_sample, head_sample
+    neg_tail_links = [[head, rel, neg_tail] for neg_tail in tail_sample]
+    neg_head_links = [[neg_head, rel, tail] for neg_head in head_sample]
+    neg_links = neg_tail_links+neg_head_links
+    neg_links = random.choices(neg_links, k=sample_size)
+    return neg_links
 
 
 def remove_nodes(A_incidence, nodes):
@@ -31,7 +37,7 @@ def construct_graph_from_edges(edges, n_entities):
     return g
 
 
-def extract_neighbor_nodes(roots, adj, h=1, max_nodes_per_hop=None, median_mult=2, inc_size=0.1):
+def extract_neighbor_nodes(roots, adj, h=1, max_nodes_per_hop=None, median_mult=4, inc_size=0.05):
     cur_nodes = roots
     visited = set()
     in_hop_neighbor = []
@@ -85,7 +91,7 @@ def get_neighbor_nodes(roots, adj, h=1, max_nodes_per_hop=None):
     cur_nodes = roots
     visited = set()
     in_hop_neighbor = []
-    inc_size = 0.3
+    inc_size = 0.2
     # st = time.time()
     if isinstance(adj, np.ndarray):
         visited.update(cur_nodes)
@@ -175,6 +181,7 @@ def node_label(subgraph, max_distance=1):
     dist_to_roots = np.array(list(zip(dist_to_roots[0][0], dist_to_roots[1][0])), dtype=int)
     target_node_labels = np.array([[0, 1], [1, 0]])
     labels = np.concatenate((target_node_labels, dist_to_roots)) if dist_to_roots.size else target_node_labels
+    labels[labels>max_distance]=9
 
     enclosing_subgraph_nodes = np.where(np.max(labels, axis=1) <= max_distance)[0]
     return labels, enclosing_subgraph_nodes
@@ -194,11 +201,11 @@ def subgraph_extraction_labeling_wiki(ind, rel, A_incidence, h=1, enclosing_sub_
     else:
         subgraph_nodes = list(ind) + list(subgraph_nei_nodes_un)
 
-    labels, enclosing_subgraph_nodes = node_label(A_incidence[:, subgraph_nodes][subgraph_nodes, :], max_distance=h)
-    pruned_subgraph_nodes = np.array(subgraph_nodes)[enclosing_subgraph_nodes].tolist()
-    pruned_labels = labels[enclosing_subgraph_nodes]
-    # pruned_subgraph_nodes = subgraph_nodes
-    # pruned_labels = labels
+    labels, enclosing_subgraph_nodes = node_label(A_incidence[subgraph_nodes, :][:, subgraph_nodes], max_distance=h)
+    # pruned_subgraph_nodes = np.array(subgraph_nodes)[enclosing_subgraph_nodes].tolist()
+    # pruned_labels = labels[enclosing_subgraph_nodes]
+    pruned_subgraph_nodes = subgraph_nodes
+    pruned_labels = labels
 
     if max_node_label_value is not None:
         pruned_labels = np.array([np.minimum(label, max_node_label_value).tolist() for label in pruned_labels])
