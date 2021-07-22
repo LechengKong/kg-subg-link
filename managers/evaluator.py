@@ -50,6 +50,7 @@ class Evaluator():
                         all_scores[self.params.val_batch_size*batch_count:self.params.val_batch_size*(batch_count+1),:]= scores
                     else:
                         tp = targets_pos.cpu().numpy()
+                        neg_link_ind = (tp+1)%dim_size
 
                         true_labels = np.zeros(scores.shape)
                         true_labels[np.arange(b_size), tp] = 1
@@ -59,8 +60,10 @@ class Evaluator():
                         true_ranking = np.sum(h10_ranking==tp[:,np.newaxis], axis=1)
                         h10_scores.append(np.mean(true_ranking))
                         mrr_scores.append(metrics.label_ranking_average_precision_score(true_labels, scores))
-                        all_labels += true_labels.flatten().tolist()
-                        pre_scores += scores.flatten().tolist()
+                        all_labels += true_labels[np.arange(b_size), tp].tolist()
+                        all_labels += true_labels[np.arange(b_size), neg_link_ind].tolist()
+                        pre_scores += scores[np.arange(b_size), tp].tolist()
+                        pre_scores += scores[np.arange(b_size), neg_link_ind].tolist()
                 except RuntimeError:
                     print("oom")
                     if save:

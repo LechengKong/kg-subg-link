@@ -37,7 +37,7 @@ def construct_graph_from_edges(edges, n_entities):
     return g
 
 
-def extract_neighbor_nodes(roots, adj, h=1, max_nodes_per_hop=None, median_mult=4, inc_size=0.05):
+def extract_neighbor_nodes(roots, adj, h=1, max_nodes_per_hop=None, median_mult=50000, inc_size=0):
     cur_nodes = roots
     visited = set()
     in_hop_neighbor = []
@@ -91,7 +91,7 @@ def get_neighbor_nodes(roots, adj, h=1, max_nodes_per_hop=None):
     cur_nodes = roots
     visited = set()
     in_hop_neighbor = []
-    inc_size = 0.2
+    inc_size = 0
     # st = time.time()
     if isinstance(adj, np.ndarray):
         visited.update(cur_nodes)
@@ -202,10 +202,10 @@ def subgraph_extraction_labeling_wiki(ind, rel, A_incidence, h=1, enclosing_sub_
         subgraph_nodes = list(ind) + list(subgraph_nei_nodes_un)
 
     labels, enclosing_subgraph_nodes = node_label(A_incidence[subgraph_nodes, :][:, subgraph_nodes], max_distance=h)
-    # pruned_subgraph_nodes = np.array(subgraph_nodes)[enclosing_subgraph_nodes].tolist()
-    # pruned_labels = labels[enclosing_subgraph_nodes]
-    pruned_subgraph_nodes = subgraph_nodes
-    pruned_labels = labels
+    pruned_subgraph_nodes = np.array(subgraph_nodes)[enclosing_subgraph_nodes].tolist()
+    pruned_labels = labels[enclosing_subgraph_nodes]
+    # pruned_subgraph_nodes = subgraph_nodes
+    # pruned_labels = labels
 
     if max_node_label_value is not None:
         pruned_labels = np.array([np.minimum(label, max_node_label_value).tolist() for label in pruned_labels])

@@ -15,7 +15,7 @@ from torch.utils.data import Subset
 class Mem:
 
     def __init__(self):
-        self.hop = 2
+        self.hop = 3
         self.enclosing_sub_graph = False
         self.max_nodes_per_hop = 40
         self.num_neg_samples_per_link = 2
@@ -23,10 +23,10 @@ class Mem:
         self.data_path = "/project/tantra/jerry.kong/ogb_project/ogb-grail-mod/data"
         self.data_set = "WN18RR"
         self.num_rels = 1315
-        self.rel_emb_dim = 16
+        self.rel_emb_dim = 32
         self.add_ht_emb = True
         self.num_gcn_layers = 3
-        self.emb_dim = 16
+        self.emb_dim = 32
         self.max_label_value = 10
         self.inp_dim = 1010
         self.attn_rel_emb_dim = 8
@@ -38,8 +38,8 @@ class Mem:
         self.has_attn = True
         self.gnn_agg_type = 'sum'
         self.optimizer = 'Adam'
-        self.lr = 0.001
-        self.l2 = 1e-2
+        self.lr = 0.01
+        self.l2 = 1e-5
         self.batch_size = 16
         self.num_workers = 16
         self.num_epochs = 20
@@ -97,7 +97,7 @@ if __name__ == '__main__':
     params.move_batch_to_device_val = move_batch_to_device_dgl_val
     torch.multiprocessing.set_sharing_strategy('file_system')
 
-    train = SubgraphDatasetContextTrain(converted_triplets, params, adj_list, params.num_rels, params.num_entities, neg_link_per_sample=25)
+    train = SubgraphDatasetContextTrain(converted_triplets, params, adj_list, params.num_rels, params.num_entities, neg_link_per_sample=1)
     val = SubgraphDatasetContextVal(converted_triplets, 'valid', params, adj_list, params.num_rels, params.num_entities, graph=train.graph, neg_link_per_sample=50)
     params.train_edges = len(train)
     params.val_size = len(val)
