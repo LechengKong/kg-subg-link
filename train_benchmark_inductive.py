@@ -15,13 +15,13 @@ class Mem:
 
     def __init__(self):
         self.hop = 3
-        self.enclosing_sub_graph = False
+        self.enclosing_sub_graph = True
         self.max_nodes_per_hop = 30
         self.num_neg_samples_per_link = 2
         self.root_path = "/project/tantra/jerry.kong/ogb_project/ogb-grail-mod/data"
         self.data_path = "/project/tantra/jerry.kong/ogb_project/ogb-grail-mod/data"
-        self.data_set = "WN18RR_v1"
-        self.ind_data_set = "WN18RR_v1_ind"
+        self.data_set = "WN18RR_v3"
+        self.ind_data_set = "WN18RR_v3_ind"
         self.num_rels = 1315
         self.rel_emb_dim = 32
         self.add_ht_emb = True
@@ -33,15 +33,15 @@ class Mem:
         self.aug_num_rels = 1315
         self.num_bases = 4
         self.num_hidden_layers = 4
-        self.dropout = 0.5
+        self.dropout = 0
         self.edge_dropout = 0.5
         self.has_attn = True
         self.gnn_agg_type = 'sum'
         self.optimizer = 'Adam'
         self.lr = 0.01
-        self.l2 = 1e-5
+        self.l2 = 1e-3
         self.batch_size = 16
-        self.num_workers = 12
+        self.num_workers = 0
         self.num_epochs = 20
         self.save_every = 1
         self.margin = 10
@@ -55,6 +55,7 @@ class Mem:
         self.candidate_size = 1001
         self.prefetch_val = 2
         self.retrain = False
+        self.eval = True
         self.retrain_seed = 111
         self.model_name = "graph_classifier_context_ind"
         self.feat_size = 768
@@ -87,6 +88,7 @@ if __name__ == '__main__':
         files[f] = osp.join(database_path,f'{f}.txt')
 
     adj_list, converted_triplets, entity2id, relation2id, id2entity, id2relation = process_files(files)
+    print(relation2id)
     train_num_entities = len(entity2id)
     train_num_rel = len(relation2id)
     print(f'Dataset {params.data_set} has {train_num_entities} entities and {train_num_rel} relations')
@@ -107,8 +109,11 @@ if __name__ == '__main__':
     params.move_batch_to_device_val = move_batch_to_device_dgl_val
     torch.multiprocessing.set_sharing_strategy('file_system')
 
-    train = SubgraphDatasetTrain(converted_triplets, params, adj_list, train_num_rel, train_num_entities, neg_link_per_sample=1)
-    val = SubgraphDatasetVal(converted_triplets_ind, 'valid', params, adj_list_ind, ind_num_rel, ind_num_entities, neg_link_per_sample=50)
+    train = SubgraphDatasetTrain(converted_triplets, params, adj_list, train_num_rel, train_num_entities, neg_link_per_sample=50)
+    if params.eval:
+        val = SubgraphDatasetVal(converted_triplets_ind, 'test', params, adj_list_ind, ind_num_rel, ind_num_entities, neg_link_per_sample=50)
+    else:
+        val = SubgraphDatasetVal(converted_triplets_ind, 'valid', params, adj_list_ind, ind_num_rel, ind_num_entities, neg_link_per_sample=50)
     params.train_edges = len(train)
     params.val_size = len(val)
     print(f'Training set has {params.train_edges} edges, Val set has {params.val_size} edges')
@@ -119,6 +124,21 @@ if __name__ == '__main__':
     if params.retrain:
         state_d = torch.load(osp.join(params.root_path, params.model_name+".pth"), map_location=params.device)
 
-    validator = Evaluator(params, graph_classifier, val)
-    trainer = Trainer(params, graph_classifier, train, state_dict=state_d, valid_evaluator=validator)
-    trainer.train()
+    if params.eval:
+        state_d = torch.load(osp.join(params.root_path, "best_"+params.model_name+".pth"), map_location=params.device)
+        graph_classifier.load_state_dict(state_d['state_dict'])
+        validator = Evaluator(params, graph_classifier, val)
+        n=5
+        h10 = []
+        apr = []
+        for i in range(n):
+            res = validator.eval()
+            h10.append(res['h10'])
+            apr.append(res['apr'])
+        print(h10, np.mean(np.array(h10)))
+        print(apr, np.mean(np.array(apr)))
+        # np.save('dblb', res['h10l'])
+    else:
+        validator = Evaluator(params, graph_classifier, val)
+        trainer = Trainer(params, graph_classifier, train, state_dict=state_d, valid_evaluator=validator)
+        trainer.train()

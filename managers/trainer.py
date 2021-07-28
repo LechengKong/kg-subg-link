@@ -41,7 +41,7 @@ class Trainer():
         self.reset_training_state()
 
     def reset_training_state(self):
-        self.best_metric = 10000000
+        self.best_metric = 0
         self.last_metric = 0
         self.not_improved_count = 0
         self.should_train = True
@@ -52,7 +52,8 @@ class Trainer():
         all_labels = []
         all_scores = []
 
-        dataloader = DataLoader(self.train_data, batch_size=self.params.batch_size,  num_workers=self.params.num_workers, collate_fn=self.params.collate_fn, pin_memory=True, prefetch_factor=2, sampler=RandomSampler(self.train_data, replacement=True, num_samples=self.params.train_edges))
+        # dataloader = DataLoader(self.train_data, batch_size=self.params.batch_size,  num_workers=self.params.num_workers, collate_fn=self.params.collate_fn, pin_memory=True, prefetch_factor=2, sampler=RandomSampler(self.train_data, replacement=True, num_samples=self.params.train_edges))
+        dataloader = DataLoader(self.train_data, batch_size=self.params.batch_size,  num_workers=self.params.num_workers, collate_fn=self.params.collate_fn, pin_memory=True, prefetch_factor=2, shuffle=True)
         self.graph_classifier.train()
         # model_params = list(self.graph_classifier.parameters())
         pbar = tqdm(dataloader)
@@ -97,9 +98,9 @@ class Trainer():
             result = self.valid_evaluator.eval()
             print('\nPerformance:' + str(result) + 'in ' + str(time.time() - tic))
 
-            if total_loss <= self.best_metric:
+            if result['h10'] >= self.best_metric:
                 self.save_classifier()
-                self.best_metric = total_loss
+                self.best_metric = result['h10']
                 self.not_improved_count = 0
 
             else:
@@ -107,7 +108,7 @@ class Trainer():
                 if self.not_improved_count > self.params.early_stop:
                     logging.info(f"Validation performance didn\'t improve for {self.params.early_stop} epochs. Training stops.")
                     self.should_train = False
-            self.last_metric = total_loss
+            self.last_metric = result['h10']
 
         torch.cuda.empty_cache()
         return total_loss/self.params.train_edges, mrr_score*self.params.batch_size/self.params.train_edges
@@ -127,5 +128,5 @@ class Trainer():
                 torch.save({'epoch': self.epoch, 'state_dict': self.graph_classifier.state_dict(), 'optimizer': self.optimizer.state_dict()}, os.path.join(self.params.root_path, self.params.model_name+'.pth'))
 
     def save_classifier(self):
-        torch.save({'epoch': self.epoch, 'state_dict': self.graph_classifier.state_dict(), 'optimizer': self.optimizer.state_dict()}, os.path.join(self.params.root_path, 'best_'+self.params.model_name+'.pth'))  # Does it overwrite or fuck with the existing file?
+        torch.save({'epoch': self.epoch, 'state_dict': self.graph_classifier.state_dict(), 'optimizer': self.optimizer.state_dict()}, os.path.join(self.params.root_path, 'best_'+self.params.model_name+'.pth'))
         logging.info('Better models found w.r.t accuracy. Saved it!')

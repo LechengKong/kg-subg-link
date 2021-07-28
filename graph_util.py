@@ -181,9 +181,9 @@ def node_label(subgraph, max_distance=1):
     dist_to_roots = np.array(list(zip(dist_to_roots[0][0], dist_to_roots[1][0])), dtype=int)
     target_node_labels = np.array([[0, 1], [1, 0]])
     labels = np.concatenate((target_node_labels, dist_to_roots)) if dist_to_roots.size else target_node_labels
-    labels[labels>max_distance]=9
+    labels[labels>2*max_distance]=9
 
-    enclosing_subgraph_nodes = np.where(np.max(labels, axis=1) <= max_distance)[0]
+    enclosing_subgraph_nodes = np.where(np.max(labels, axis=1) <= 2* max_distance)[0]
     return labels, enclosing_subgraph_nodes
 
 
@@ -202,10 +202,10 @@ def subgraph_extraction_labeling_wiki(ind, rel, A_incidence, h=1, enclosing_sub_
         subgraph_nodes = list(ind) + list(subgraph_nei_nodes_un)
 
     labels, enclosing_subgraph_nodes = node_label(A_incidence[subgraph_nodes, :][:, subgraph_nodes], max_distance=h)
-    pruned_subgraph_nodes = np.array(subgraph_nodes)[enclosing_subgraph_nodes].tolist()
-    pruned_labels = labels[enclosing_subgraph_nodes]
-    # pruned_subgraph_nodes = subgraph_nodes
-    # pruned_labels = labels
+    # pruned_subgraph_nodes = np.array(subgraph_nodes)[enclosing_subgraph_nodes].tolist()
+    # pruned_labels = labels[enclosing_subgraph_nodes]
+    pruned_subgraph_nodes = subgraph_nodes
+    pruned_labels = labels
 
     if max_node_label_value is not None:
         pruned_labels = np.array([np.minimum(label, max_node_label_value).tolist() for label in pruned_labels])

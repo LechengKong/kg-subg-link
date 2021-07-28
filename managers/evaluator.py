@@ -22,6 +22,7 @@ class Evaluator():
         h10_scores = []
         all_labels = []
         pre_scores = []
+        # h10_list = []
         if save:
             dataloader = DataLoader(self.data, batch_size=self.params.val_batch_size, num_workers=self.params.num_workers, collate_fn=self.params.collate_fn_val, prefetch_factor=self.params.prefetch_val, pin_memory=True)
             num_batches = len(dataloader)
@@ -30,7 +31,8 @@ class Evaluator():
             file_n = 0
             batch_count = 0
         else:
-            dataloader = DataLoader(self.data, batch_size=self.params.val_batch_size, num_workers=self.params.num_workers, collate_fn=self.params.collate_fn_val, prefetch_factor=self.params.prefetch_val, pin_memory=True , sampler=RandomSampler(self.data, replacement=True, num_samples=self.params.val_size))
+            # dataloader = DataLoader(self.data, batch_size=self.params.val_batch_size, num_workers=self.params.num_workers, collate_fn=self.params.collate_fn_val, prefetch_factor=self.params.prefetch_val, pin_memory=True , sampler=RandomSampler(self.data, replacement=False, num_samples=self.params.val_size))
+            dataloader = DataLoader(self.data, batch_size=self.params.val_batch_size, num_workers=self.params.num_workers, collate_fn=self.params.collate_fn_val, prefetch_factor=self.params.prefetch_val, pin_memory=True )
         # vs = time.time()
         self.graph_classifier.eval()
         with torch.no_grad():
@@ -45,6 +47,7 @@ class Evaluator():
                     score_pos = self.graph_classifier(data_pos)
                     scores = score_pos.view(len(targets_pos), -1)
                     scores = scores.cpu().numpy()
+                    # print(scores)
                     (b_size, dim_size) = scores.shape
                     if save:
                         all_scores[self.params.val_batch_size*batch_count:self.params.val_batch_size*(batch_count+1),:]= scores
@@ -58,6 +61,7 @@ class Evaluator():
                         ranking = np.argsort(scores, axis=1)
                         h10_ranking = ranking[:,-10:]
                         true_ranking = np.sum(h10_ranking==tp[:,np.newaxis], axis=1)
+                        # h10_list += true_ranking.tolist()
                         h10_scores.append(np.mean(true_ranking))
                         mrr_scores.append(metrics.label_ranking_average_precision_score(true_labels, scores))
                         all_labels += true_labels[np.arange(b_size), tp].tolist()
