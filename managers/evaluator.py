@@ -77,7 +77,7 @@ class Evaluator():
                             np.save("/project/tantra/jerry.kong/ogb_project/dataset/wikikg90m_kddcup2021/filter_pred_lg8/pred_"+str(file_n), all_scores)
                             all_scores = np.zeros((int(save_batch*self.params.val_batch_size), 100))
                             file_n+=1
-                    continue
+                    # continue
                 # print("gputime", time.time()-vs)
                 # print("calctime",time.time()-vs)
                 # vs = time.time()

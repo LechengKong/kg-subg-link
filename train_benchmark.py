@@ -19,8 +19,8 @@ class Mem:
         self.enclosing_sub_graph = False
         self.max_nodes_per_hop = 40
         self.num_neg_samples_per_link = 2
-        self.root_path = "/project/tantra/jerry.kong/ogb_project/ogb-grail-mod/data"
-        self.data_path = "/project/tantra/jerry.kong/ogb_project/ogb-grail-mod/data"
+        self.root_path = "C:/Users/ishaa/kg-subg-link2/data"
+        self.data_path = "C:/Users/ishaa/kg-subg-link2/data"
         self.data_set = "WN18RR"
         self.num_rels = 1315
         self.rel_emb_dim = 32
@@ -40,8 +40,8 @@ class Mem:
         self.optimizer = 'Adam'
         self.lr = 0.01
         self.l2 = 1e-5
-        self.batch_size = 16
-        self.num_workers = 16
+        self.batch_size = 32
+        self.num_workers = 10
         self.num_epochs = 20
         self.save_every = 1
         self.margin = 10
@@ -97,7 +97,7 @@ if __name__ == '__main__':
     params.move_batch_to_device_val = move_batch_to_device_dgl_val
     torch.multiprocessing.set_sharing_strategy('file_system')
 
-    train = SubgraphDatasetContextTrain(converted_triplets, params, adj_list, params.num_rels, params.num_entities, neg_link_per_sample=1)
+    train = SubgraphDatasetContextTrain(converted_triplets, params, adj_list, params.num_rels, params.num_entities, neg_link_per_sample=50)
     val = SubgraphDatasetContextVal(converted_triplets, 'valid', params, adj_list, params.num_rels, params.num_entities, graph=train.graph, neg_link_per_sample=50)
     params.train_edges = len(train)
     params.val_size = len(val)

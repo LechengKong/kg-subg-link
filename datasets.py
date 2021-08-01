@@ -70,9 +70,10 @@ class SubgraphDatasetContextTrain(Dataset):
         pos_subgraph = self._prepare_features_new(pos_subgraph, pos_label, None)
         logging.debug(f'sample one:{time.time()-st}')
         neg_subgraphs = []
+        
         for i in range(self.neg_sample):
             neg_nodes, neg_label, _, _, _ = subgraph_extraction_labeling_wiki([node_to_id[neg_links[i][0]], node_to_id[neg_links[i][2]]], neg_links[i][1], local_adj_mat, h=self.params.hop, max_nodes_per_hop=self.params.max_nodes_per_hop)
-            # print(len(neg_nodes))
+            
             neg_subgraph = main_subgraph.subgraph(neg_nodes)
             neg_subgraph.edata['type'] = main_subgraph.edata['type'][neg_subgraph.edata[dgl.EID]]
             neg_subgraph.edata['label'] = torch.tensor(neg_links[i][1] * np.ones(neg_subgraph.edata['type'].shape),
@@ -82,7 +83,34 @@ class SubgraphDatasetContextTrain(Dataset):
             neg_subgraph.add_edges([local_node_to_id[node_to_id[neg_links[i][0]]]], [local_node_to_id[node_to_id[neg_links[i][2]]]])
             neg_subgraph.edata['type'][-1] = torch.tensor(neg_links[i][1], dtype=torch.int32)
             neg_subgraph.edata['label'][-1] = torch.tensor(neg_links[i][1], dtype=torch.int32)
-            neg_subgraphs.append(self._prepare_features_new(neg_subgraph, neg_label, None))
+            # # for k in range(NUMBEROFEDGES):
+            # #     edge_ratios
+            # neg_neighbors= dgl.sampling.sample_neighbors(neg_subgraph, [i], -1) #is graph neg_subgraph or main_subgraph
+            # # neg_ratio.edges(order='eid')
+             # neg_incoming = neg_subgraph.in_edges(neg_subgraph.nodes(), form="all")
+            # print(neg_incoming)
+
+            # PSEUDOCODE
+            # edge_ratios = [[None] * num_edge_types] * num_nodes
+            # for i in range(num_nodes):
+            #     for k in range(num_edge_types):
+                    # edge_ratios[i][k] = neg_subgraph.in_degrees(torch.tensor[i], etype=edge_type)/neg_subgraph.in_degrees(torch.tensor([i]), etype=all)
+
+            # edge_ratios = [[None] * num_edge_types] * neg_subgraph.num_nodes()
+            # for i in range(neg_subgraph.num_nodes()):
+            #     for k in range(num_edge_types):
+            #         edge_ratios[i][k] = neg_subgraph.in_degrees(torch.tensor([i]), etype=edge_type)
+            edge_ratios = torch.tensor([[0.0 for i in range(self.num_rels)] for k in range(neg_subgraph.num_nodes())])
+            if neg_subgraph.num_nodes() > 2:
+                for i in range(neg_subgraph.num_nodes()): # iterates through subgraph nodes
+                    preds = neg_subgraph.predecessors(i) # neighboring nodes with outgoing edges to current node
+                    if (preds.shape[0]) > 0:
+                        incoming_edges = neg_subgraph.edge_ids(preds, i) # tensor of IDs of incoming edges (IDs refer to position in array of all edges in subgraph)
+                        for k in range(incoming_edges.size()[0]): # iterates through incoming edges of current node
+                            edge_ratios[i][neg_subgraph.edata['type'][incoming_edges[k]] - 1] += 1; # type of current incoming edge
+                        edge_ratios[i] = torch.div(edge_ratios[i], incoming_edges.size()[0]) # divides total counts of each edge type by total incoming edges to generate ratios
+            neg_subgraphs.append(self._prepare_features_new(neg_subgraph, neg_label, edge_ratios))
+
 
         logging.debug(f'sampleall:{time.time()-st}')
         return pos_subgraph, 1, pos_link[1], neg_subgraphs, [0] * len(neg_subgraphs), [neg_links[i][1] for i in
