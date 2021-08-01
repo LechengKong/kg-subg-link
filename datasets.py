@@ -57,12 +57,14 @@ class SubgraphDatasetContextTrain(Dataset):
         # print("adj:", time.time()-st)
         local_adj_mat[node_to_id[pos_link[0]], node_to_id[pos_link[2]]]=0
         local_adj_mat[node_to_id[pos_link[2]], node_to_id[pos_link[0]]]=0
-        pos_nodes, pos_label, _, _, _ = subgraph_extraction_labeling_wiki([node_to_id[pos_link[0]], node_to_id[pos_link[2]]], pos_link[1], local_adj_mat, h=self.params.hop, enclosing_sub_graph=self.params.enclosing_sub_graph, max_nodes_per_hop=self.params.max_nodes_per_hop)
+        pos_nodes, pos_label, disconnected_nodes = subgraph_extraction_labeling_wiki([node_to_id[pos_link[0]], node_to_id[pos_link[2]]], pos_link[1], local_adj_mat, h=self.params.hop, enclosing_sub_graph=self.params.enclosing_sub_graph, max_nodes_per_hop=self.params.max_nodes_per_hop)
         local_adj_mat[node_to_id[pos_link[0]], node_to_id[pos_link[2]]]=1
         local_adj_mat[node_to_id[pos_link[2]], node_to_id[pos_link[0]]]=1
         # if len(pos_nodes) == 2:
         #     print("Err")
         # print(len(pos_nodes))
+        if len(pos_nodes)==2 and not main_subgraph.has_edges_between(pos_nodes[1],pos_nodes[0]):
+            print(rel)
         pos_subgraph = main_subgraph.subgraph(pos_nodes)
         pos_subgraph.edata['type'] = main_subgraph.edata['type'][pos_subgraph.edata[dgl.EID]]
         pos_subgraph.edata['label'] = torch.tensor(pos_link[1] * np.ones(pos_subgraph.edata['type'].shape),
@@ -71,7 +73,7 @@ class SubgraphDatasetContextTrain(Dataset):
         logging.debug(f'sample one:{time.time()-st}')
         neg_subgraphs = []
         for i in range(self.neg_sample):
-            neg_nodes, neg_label, _, _, _ = subgraph_extraction_labeling_wiki([node_to_id[neg_links[i][0]], node_to_id[neg_links[i][2]]], neg_links[i][1], local_adj_mat, h=self.params.hop, enclosing_sub_graph=self.params.enclosing_sub_graph, max_nodes_per_hop=self.params.max_nodes_per_hop)
+            neg_nodes, neg_label, disconnected_nodes = subgraph_extraction_labeling_wiki([node_to_id[neg_links[i][0]], node_to_id[neg_links[i][2]]], neg_links[i][1], local_adj_mat, h=self.params.hop, enclosing_sub_graph=self.params.enclosing_sub_graph, max_nodes_per_hop=self.params.max_nodes_per_hop)
             # print(len(neg_nodes))
             neg_subgraph = main_subgraph.subgraph(neg_nodes)
             neg_subgraph.edata['type'] = main_subgraph.edata['type'][neg_subgraph.edata[dgl.EID]]
@@ -154,11 +156,13 @@ class SubgraphDatasetContextVal(Dataset):
         can_edges = [pos_link]+neg_links
         graphs = []
         for i, edge in enumerate(can_edges):
-            pos_nodes, pos_label, _, _, _ = subgraph_extraction_labeling_wiki([node_to_id[edge[0]], node_to_id[edge[2]]], rel, local_adj_mat, h=self.params.hop, enclosing_sub_graph=self.params.enclosing_sub_graph, max_nodes_per_hop=self.params.max_nodes_per_hop)
+            pos_nodes, pos_label, disconnected_nodes = subgraph_extraction_labeling_wiki([node_to_id[edge[0]], node_to_id[edge[2]]], rel, local_adj_mat, h=self.params.hop, enclosing_sub_graph=self.params.enclosing_sub_graph, max_nodes_per_hop=self.params.max_nodes_per_hop)
             # if i == 0 and len(pos_nodes)==2:
             #     print("err")
             # if i != 0:
             #     print(len(pos_nodes))
+            if i==0 and len(pos_nodes)==2 and not main_subgraph.has_edges_between(pos_nodes[0],pos_nodes[1]) and not main_subgraph.has_edges_between(pos_nodes[1],pos_nodes[0]):
+                print(rel)
             pos_subgraph = main_subgraph.subgraph(pos_nodes)
             pos_subgraph.edata['type'] = main_subgraph.edata['type'][pos_subgraph.edata[dgl.EID]]
             pos_subgraph.edata['label'] = torch.tensor(rel * np.ones(pos_subgraph.edata['type'].shape),
@@ -242,7 +246,7 @@ class SubgraphDatasetConnectTrain(Dataset):
         node_to_id = {pid: i for i, pid in enumerate(p_id)}
         # print("adj:", time.time()-st)
 
-        pos_nodes, pos_label, _, _, _ = subgraph_extraction_labeling_wiki([node_to_id[pos_link[0]], node_to_id[pos_link[2]]], pos_link[1], local_adj_mat, h=self.params.hop, enclosing_sub_graph=self.params.enclosing_sub_graph, max_nodes_per_hop=self.params.max_nodes_per_hop)
+        pos_nodes, pos_label, disconnected_nodes = subgraph_extraction_labeling_wiki([node_to_id[pos_link[0]], node_to_id[pos_link[2]]], pos_link[1], local_adj_mat, h=self.params.hop, enclosing_sub_graph=self.params.enclosing_sub_graph, max_nodes_per_hop=self.params.max_nodes_per_hop)
         # if len(pos_nodes) == 2:
         #     print("Err")
         # print(len(pos_nodes))
@@ -263,11 +267,11 @@ class SubgraphDatasetConnectTrain(Dataset):
             if local_adj_mat[node_to_id[neg_links[i][0]], node_to_id[neg_links[i][2]]]==0:
                 local_adj_mat[node_to_id[neg_links[i][0]], node_to_id[neg_links[i][2]]]=1
                 local_adj_mat[node_to_id[neg_links[i][2]], node_to_id[neg_links[i][0]]]=1
-                neg_nodes, neg_label, _, _, _ = subgraph_extraction_labeling_wiki([node_to_id[neg_links[i][0]], node_to_id[neg_links[i][2]]], neg_links[i][1], local_adj_mat, h=self.params.hop, max_nodes_per_hop=self.params.max_nodes_per_hop)
+                neg_nodes, neg_label, disconnected_nodes = subgraph_extraction_labeling_wiki([node_to_id[neg_links[i][0]], node_to_id[neg_links[i][2]]], neg_links[i][1], local_adj_mat, h=self.params.hop, max_nodes_per_hop=self.params.max_nodes_per_hop)
                 local_adj_mat[node_to_id[neg_links[i][0]], node_to_id[neg_links[i][2]]]=0
                 local_adj_mat[node_to_id[neg_links[i][2]], node_to_id[neg_links[i][0]]]=0
             else:
-                neg_nodes, neg_label, _, _, _ = subgraph_extraction_labeling_wiki([node_to_id[neg_links[i][0]], node_to_id[neg_links[i][2]]], neg_links[i][1], local_adj_mat, h=self.params.hop, max_nodes_per_hop=self.params.max_nodes_per_hop)
+                neg_nodes, neg_label, disconnected_nodes = subgraph_extraction_labeling_wiki([node_to_id[neg_links[i][0]], node_to_id[neg_links[i][2]]], neg_links[i][1], local_adj_mat, h=self.params.hop, max_nodes_per_hop=self.params.max_nodes_per_hop)
             # print(len(neg_nodes))
             neg_subgraph = main_subgraph.subgraph(neg_nodes)
             neg_subgraph.edata['type'] = main_subgraph.edata['type'][neg_subgraph.edata[dgl.EID]]
@@ -351,11 +355,11 @@ class SubgraphDatasetConnectVal(Dataset):
             if local_adj_mat[node_to_id[edge[0]], node_to_id[edge[2]]]==0:
                 local_adj_mat[node_to_id[edge[0]], node_to_id[edge[2]]]=1
                 local_adj_mat[node_to_id[edge[2]], node_to_id[edge[0]]]=1
-                pos_nodes, pos_label, _, _, _ = subgraph_extraction_labeling_wiki([node_to_id[edge[0]], node_to_id[edge[2]]], rel, local_adj_mat, h=self.params.hop, enclosing_sub_graph=self.params.enclosing_sub_graph, max_nodes_per_hop=self.params.max_nodes_per_hop)
+                pos_nodes, pos_label, disconnected_nodes = subgraph_extraction_labeling_wiki([node_to_id[edge[0]], node_to_id[edge[2]]], rel, local_adj_mat, h=self.params.hop, enclosing_sub_graph=self.params.enclosing_sub_graph, max_nodes_per_hop=self.params.max_nodes_per_hop)
                 local_adj_mat[node_to_id[edge[0]], node_to_id[edge[2]]]=0
                 local_adj_mat[node_to_id[edge[2]], node_to_id[edge[0]]]=0
             else:
-                pos_nodes, pos_label, _, _, _ = subgraph_extraction_labeling_wiki([node_to_id[edge[0]], node_to_id[edge[2]]], rel, local_adj_mat, h=self.params.hop, enclosing_sub_graph=self.params.enclosing_sub_graph,  max_nodes_per_hop=self.params.max_nodes_per_hop)
+                pos_nodes, pos_label, disconnected_nodes = subgraph_extraction_labeling_wiki([node_to_id[edge[0]], node_to_id[edge[2]]], rel, local_adj_mat, h=self.params.hop, enclosing_sub_graph=self.params.enclosing_sub_graph,  max_nodes_per_hop=self.params.max_nodes_per_hop)
             # if i == 0 and len(pos_nodes)==2:
             #     print("err")
             # if i != 0:
@@ -369,6 +373,7 @@ class SubgraphDatasetConnectVal(Dataset):
             pos_subgraph.edata['type'][-1] = torch.tensor(rel, dtype=torch.int32)
             pos_subgraph.edata['label'][-1] = torch.tensor(rel, dtype=torch.int32)
             pos_subgraph = self._prepare_features_new(pos_subgraph, pos_label, None)
+            pos_subgraph.ndata['t_label'] = torch.tensor(rel*np.ones((pos_subgraph.num_nodes(),1)))
             graphs.append(pos_subgraph)
         return graphs, [rel]*len(graphs), 0
 
@@ -423,7 +428,7 @@ class SubgraphDatasetTrain(Dataset):
         head, rel, tail = self.edges[index]
         neg_links = sample_neg_link(self.coo_adj_list, rel, head, tail, self.num_nodes, self.neg_sample)
         pos_link = [head, rel, tail]
-        nodes = [link[0] for link in neg_links] + [link[2] for link in neg_links] + [pos_link[0], pos_link[2]]
+        nodes = [pos_link[0], pos_link[2]]+[link[0] for link in neg_links] + [link[2] for link in neg_links]
         node_set = set(nodes)
         logging.debug(f'prepare nodes:{time.time()-st}')
         sample_nodes = extract_neighbor_nodes(node_set, self.adj_mat, h=self.params.hop, max_nodes_per_hop=500)
@@ -439,29 +444,61 @@ class SubgraphDatasetTrain(Dataset):
         logging.debug(f'localmat:{time.time()-st}')
         node_to_id = {pid: i for i, pid in enumerate(p_id)}
         # print("adj:", time.time()-st)
+        local_adj_mat[node_to_id[pos_link[0]], node_to_id[pos_link[2]]]=0
+        local_adj_mat[node_to_id[pos_link[2]], node_to_id[pos_link[0]]]=0  
+        pos_nodes, pos_label, disconnected_nodes = subgraph_extraction_labeling_wiki([node_to_id[pos_link[0]], node_to_id[pos_link[2]]], pos_link[1], local_adj_mat, h=self.params.hop, enclosing_sub_graph=self.params.enclosing_sub_graph, max_nodes_per_hop=self.params.max_nodes_per_hop)
+        local_adj_mat[node_to_id[pos_link[0]], node_to_id[pos_link[2]]]=1
+        local_adj_mat[node_to_id[pos_link[2]], node_to_id[pos_link[0]]]=1
 
-        pos_nodes, pos_label, _, _, _ = subgraph_extraction_labeling_wiki([node_to_id[pos_link[0]], node_to_id[pos_link[2]]], pos_link[1], local_adj_mat, h=self.params.hop, enclosing_sub_graph=self.params.enclosing_sub_graph, max_nodes_per_hop=self.params.max_nodes_per_hop)
         # if len(pos_nodes) == 2:
         #     print("Err")
         # print(pos_nodes)
         # print(len(pos_nodes))
+        # if len(pos_nodes)==2 and not main_subgraph.has_edges_between(pos_nodes[1],pos_nodes[0]):
+        #     print(rel)
         pos_subgraph = main_subgraph.subgraph(pos_nodes)
         pos_subgraph.edata['type'] = main_subgraph.edata['type'][pos_subgraph.edata[dgl.EID]]
         pos_subgraph.edata['label'] = torch.tensor(pos_link[1] * np.ones(pos_subgraph.edata['type'].shape),
                                                    dtype=torch.long)
+        near_edges = pos_subgraph.out_edges(0,'all')
+        sister_nodes = near_edges[1][pos_subgraph.edata['type'][near_edges[2]] == rel]
+        pos_subgraph.ndata['tail_sister'] = torch.tensor(np.zeros((pos_subgraph.num_nodes(),1)), dtype=torch.int32)
+        pos_subgraph.ndata['tail_sister'][sister_nodes] = 1
+
+        near_edges = pos_subgraph.in_edges(1,'all')
+        sister_nodes = near_edges[0][pos_subgraph.edata['type'][near_edges[2]] == rel]
+        pos_subgraph.ndata['head_sister'] = torch.tensor(np.zeros((pos_subgraph.num_nodes(),1)), dtype=torch.int32)
+        pos_subgraph.ndata['head_sister'][sister_nodes] = 1
+
         pos_subgraph = self._prepare_features_new(pos_subgraph, pos_label, None)
+        pos_subgraph.ndata['t_label'] = torch.tensor(rel*np.ones((pos_subgraph.num_nodes(),1)), dtype=torch.int32)
+        # pos_subgraph.ndata['rim_label'] = torch.tensor(np.zeros((pos_subgraph.num_nodes(),1)), dtype=torch.int32)
+        # pos_subgraph.ndata['rim_label'][disconnected_nodes] = 1
         logging.debug(f'sample one:{time.time()-st}')
         neg_subgraphs = []
         for i in range(self.neg_sample):
-            neg_nodes, neg_label, _, _, _ = subgraph_extraction_labeling_wiki([node_to_id[neg_links[i][0]], node_to_id[neg_links[i][2]]], neg_links[i][1], local_adj_mat, h=self.params.hop, enclosing_sub_graph=self.params.enclosing_sub_graph,  max_nodes_per_hop=self.params.max_nodes_per_hop)
+            neg_nodes, neg_label, disconnected_nodes = subgraph_extraction_labeling_wiki([node_to_id[neg_links[i][0]], node_to_id[neg_links[i][2]]], neg_links[i][1], local_adj_mat, h=self.params.hop, enclosing_sub_graph=self.params.enclosing_sub_graph,  max_nodes_per_hop=self.params.max_nodes_per_hop)
             neg_subgraph = main_subgraph.subgraph(neg_nodes)
             neg_subgraph.edata['type'] = main_subgraph.edata['type'][neg_subgraph.edata[dgl.EID]]
             neg_subgraph.edata['label'] = torch.tensor(neg_links[i][1] * np.ones(neg_subgraph.edata['type'].shape),
                                                        dtype=torch.long)
+            near_edges = neg_subgraph.out_edges(0,'all')
+            sister_nodes = near_edges[1][neg_subgraph.edata['type'][near_edges[2]] == rel]
+            neg_subgraph.ndata['tail_sister'] = torch.tensor(np.zeros((neg_subgraph.num_nodes(),1)), dtype=torch.int32)
+            neg_subgraph.ndata['tail_sister'][sister_nodes] = 1
+
+            near_edges = neg_subgraph.in_edges(1,'all')
+            sister_nodes = near_edges[0][neg_subgraph.edata['type'][near_edges[2]] == rel]
+            neg_subgraph.ndata['head_sister'] = torch.tensor(np.zeros((neg_subgraph.num_nodes(),1)), dtype=torch.int32)
+            neg_subgraph.ndata['head_sister'][sister_nodes] = 1
             neg_subgraph.add_edges([0], [1])
             neg_subgraph.edata['type'][-1] = torch.tensor(neg_links[i][1], dtype=torch.int32)
             neg_subgraph.edata['label'][-1] = torch.tensor(neg_links[i][1], dtype=torch.int32)
-            neg_subgraphs.append(self._prepare_features_new(neg_subgraph, neg_label, None))
+            neg_subgraph = self._prepare_features_new(neg_subgraph, neg_label, None)
+            neg_subgraph.ndata['t_label'] = torch.tensor(rel*np.ones((neg_subgraph.num_nodes(),1)), dtype=torch.int32)
+            # neg_subgraph.ndata['rim_label'] = torch.tensor(np.zeros((neg_subgraph.num_nodes(),1)), dtype=torch.int32)
+            # neg_subgraph.ndata['rim_label'][disconnected_nodes] = 1
+            neg_subgraphs.append(neg_subgraph)
 
         logging.debug(f'sampleall:{time.time()-st}')
         return pos_subgraph, 1, pos_link[1], neg_subgraphs, [0] * len(neg_subgraphs), [neg_links[i][1] for i in
@@ -533,7 +570,7 @@ class SubgraphDatasetVal(Dataset):
         can_edges = [pos_link]+neg_links
         graphs = []
         for i, edge in enumerate(can_edges):
-            pos_nodes, pos_label, _, _, _ = subgraph_extraction_labeling_wiki([node_to_id[edge[0]], node_to_id[edge[2]]], rel, local_adj_mat, h=self.params.hop, enclosing_sub_graph=self.params.enclosing_sub_graph,  max_nodes_per_hop=self.params.max_nodes_per_hop)
+            pos_nodes, pos_label, disconnected_nodes = subgraph_extraction_labeling_wiki([node_to_id[edge[0]], node_to_id[edge[2]]], rel, local_adj_mat, h=self.params.hop, enclosing_sub_graph=self.params.enclosing_sub_graph,  max_nodes_per_hop=self.params.max_nodes_per_hop)
             # if i != 0:
             #     print(len(pos_nodes))
             pos_subgraph = main_subgraph.subgraph(pos_nodes)
@@ -543,10 +580,22 @@ class SubgraphDatasetVal(Dataset):
             pos_subgraph.edata['type'] = main_subgraph.edata['type'][pos_subgraph.edata[dgl.EID]]
             pos_subgraph.edata['label'] = torch.tensor(rel * np.ones(pos_subgraph.edata['type'].shape),
                                                        dtype=torch.long)
+            near_edges = pos_subgraph.out_edges(0,'all')
+            sister_nodes = near_edges[1][pos_subgraph.edata['type'][near_edges[2]] == rel]
+            pos_subgraph.ndata['tail_sister'] = torch.tensor(np.zeros((pos_subgraph.num_nodes(),1)), dtype=torch.int32)
+            pos_subgraph.ndata['tail_sister'][sister_nodes] = 1
+
+            near_edges = pos_subgraph.in_edges(1,'all')
+            sister_nodes = near_edges[0][pos_subgraph.edata['type'][near_edges[2]] == rel]
+            pos_subgraph.ndata['head_sister'] = torch.tensor(np.zeros((pos_subgraph.num_nodes(),1)), dtype=torch.int32)
+            pos_subgraph.ndata['head_sister'][sister_nodes] = 1
             pos_subgraph.add_edges([0],[1])
             pos_subgraph.edata['type'][-1] = torch.tensor(rel, dtype=torch.int32)
             pos_subgraph.edata['label'][-1] = torch.tensor(rel, dtype=torch.int32)
             pos_subgraph = self._prepare_features_new(pos_subgraph, pos_label, None)
+            pos_subgraph.ndata['t_label'] = torch.tensor(rel*np.ones((pos_subgraph.num_nodes(),1)), dtype=torch.int32)
+            # pos_subgraph.ndata['rim_label'] = torch.tensor(np.zeros((pos_subgraph.num_nodes(),1)), dtype=torch.int32)
+            # pos_subgraph.ndata['rim_label'][disconnected_nodes] = 1
             graphs.append(pos_subgraph)
         return graphs, [rel]*len(graphs), 0
 
@@ -603,7 +652,7 @@ class SubgraphDatasetNoSubTrain(Dataset):
         pos_link = [head, rel, tail]
         # print("adj:", time.time()-st)
 
-        pos_nodes, pos_label, _, _, _ = subgraph_extraction_labeling_wiki([pos_link[0], pos_link[2]], pos_link[1], self.adj_mat, h=self.params.hop, max_nodes_per_hop=self.params.max_nodes_per_hop)
+        pos_nodes, pos_label, disconnected_nodes = subgraph_extraction_labeling_wiki([pos_link[0], pos_link[2]], pos_link[1], self.adj_mat, h=self.params.hop, max_nodes_per_hop=self.params.max_nodes_per_hop)
         if len(pos_nodes) == 2:
             print("Err")
         # print(len(pos_nodes))
@@ -615,7 +664,7 @@ class SubgraphDatasetNoSubTrain(Dataset):
         logging.debug(f'sample one:{time.time()-st}')
         neg_subgraphs = []
         for i in range(self.neg_sample):
-            neg_nodes, neg_label, _, _, _ = subgraph_extraction_labeling_wiki([neg_links[i][0], neg_links[i][2]], neg_links[i][1], self.adj_mat, h=self.params.hop, max_nodes_per_hop=self.params.max_nodes_per_hop)
+            neg_nodes, neg_label, disconnected_nodes = subgraph_extraction_labeling_wiki([neg_links[i][0], neg_links[i][2]], neg_links[i][1], self.adj_mat, h=self.params.hop, max_nodes_per_hop=self.params.max_nodes_per_hop)
             # print(len(neg_nodes))
             neg_subgraph = self.graph.subgraph(neg_nodes)
             neg_subgraph.edata['type'] = self.graph.edata['type'][neg_subgraph.edata[dgl.EID]]
@@ -687,7 +736,7 @@ class SubgraphDatasetNoSubVal(Dataset):
         can_edges = [pos_link]+neg_links
         graphs = []
         for i, edge in enumerate(can_edges):
-            pos_nodes, pos_label, _, _, _ = subgraph_extraction_labeling_wiki([edge[0], edge[2]], rel, self.adj_mat, h=self.params.hop, max_nodes_per_hop=self.params.max_nodes_per_hop)
+            pos_nodes, pos_label, disconnected_nodes = subgraph_extraction_labeling_wiki([edge[0], edge[2]], rel, self.adj_mat, h=self.params.hop, max_nodes_per_hop=self.params.max_nodes_per_hop)
             # if i == 0 and len(pos_nodes)==2:
             #     print("err")
             # if i != 0:
@@ -784,7 +833,7 @@ class SubgraphDatasetWikiOnlineValSubset(Dataset):
         node_to_id = {pid: i for i, pid in enumerate(p_id)}
         # print("adj:", time.time()-st)
 
-        pos_nodes, pos_label, _, _, _ = subgraph_extraction_labeling_wiki([node_to_id[pos_link[0]], node_to_id[pos_link[2]]], pos_link[1], local_adj_mat, h=self.params.hop, max_nodes_per_hop=self.params.max_nodes_per_hop)
+        pos_nodes, pos_label, disconnected_nodes = subgraph_extraction_labeling_wiki([node_to_id[pos_link[0]], node_to_id[pos_link[2]]], pos_link[1], local_adj_mat, h=self.params.hop, max_nodes_per_hop=self.params.max_nodes_per_hop)
         # if len(pos_nodes) == 2:
         #     print(index)
         pos_subgraph = main_subgraph.subgraph(pos_nodes)
@@ -799,7 +848,7 @@ class SubgraphDatasetWikiOnlineValSubset(Dataset):
         neg_subgraphs = []
         # print("sample 1:", time.time()-st)
         for i in range(self.neg_sample):
-            neg_nodes, neg_label, _, _, _ = subgraph_extraction_labeling_wiki([node_to_id[neg_links[i][0]], node_to_id[neg_links[i][2]]], neg_links[i][1], local_adj_mat, h=self.params.hop, max_nodes_per_hop=self.params.max_nodes_per_hop)
+            neg_nodes, neg_label, disconnected_nodes = subgraph_extraction_labeling_wiki([node_to_id[neg_links[i][0]], node_to_id[neg_links[i][2]]], neg_links[i][1], local_adj_mat, h=self.params.hop, max_nodes_per_hop=self.params.max_nodes_per_hop)
 
             neg_subgraph = main_subgraph.subgraph(neg_nodes)
             neg_subgraph.edata['type'] = main_subgraph.edata['type'][neg_subgraph.edata[dgl.EID]]
@@ -892,7 +941,7 @@ class SubgraphDatasetWikiLocalSubsetEval(Dataset):
         # print('mis',time.time()-st)
         graphs = []
         for i, candidate in enumerate(candidates):
-            pos_nodes, pos_label, _, _, _ = subgraph_extraction_labeling_wiki([head, candidate], rel,
+            pos_nodes, pos_label, disconnected_nodes = subgraph_extraction_labeling_wiki([head, candidate], rel,
                                                                               adj_mat, h=self.params.hop,max_nodes_per_hop=self.params.max_nodes_per_hop)
             pos_subgraph = g.subgraph(pos_nodes)
             pos_subgraph.edata['type'] = g.edata['type'][pos_subgraph.edata[dgl.EID]]
@@ -983,7 +1032,7 @@ class SubgraphDatasetWikiLocalSubsetTest(Dataset):
         # print('mis',time.time()-st)
         graphs = []
         for i, candidate in enumerate(candidates):
-            pos_nodes, pos_label, _, _, _ = subgraph_extraction_labeling_wiki([head, candidate], rel,
+            pos_nodes, pos_label, disconnected_nodes = subgraph_extraction_labeling_wiki([head, candidate], rel,
                                                                               adj_mat, h=self.params.hop, max_nodes_per_hop=30)
             pos_subgraph = g.subgraph(pos_nodes)
             pos_subgraph.edata['type'] = g.edata['type'][pos_subgraph.edata[dgl.EID]]
