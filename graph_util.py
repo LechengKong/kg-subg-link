@@ -184,7 +184,8 @@ def node_label(subgraph, max_distance=1):
     labels[labels>2*max_distance]=9
 
     enclosing_subgraph_nodes = np.where(np.max(labels, axis=1) <= 2* max_distance)[0]
-    return labels, enclosing_subgraph_nodes
+    disconnected_subgraph_nodes = np.where(np.max(labels, axis=1) > 2* max_distance)[0]
+    return labels, enclosing_subgraph_nodes, disconnected_subgraph_nodes
 
 
 def subgraph_extraction_labeling_wiki(ind, rel, A_incidence, h=1, enclosing_sub_graph=False, max_nodes_per_hop=None, max_node_label_value=None):
@@ -201,18 +202,8 @@ def subgraph_extraction_labeling_wiki(ind, rel, A_incidence, h=1, enclosing_sub_
     else:
         subgraph_nodes = list(ind) + list(subgraph_nei_nodes_un)
 
-    labels, enclosing_subgraph_nodes = node_label(A_incidence[subgraph_nodes, :][:, subgraph_nodes], max_distance=h)
-    # pruned_subgraph_nodes = np.array(subgraph_nodes)[enclosing_subgraph_nodes].tolist()
-    # pruned_labels = labels[enclosing_subgraph_nodes]
-    pruned_subgraph_nodes = subgraph_nodes
-    pruned_labels = labels
+    labels, enclosing_subgraph_nodes, disconnected_nodes = node_label(A_incidence[subgraph_nodes, :][:, subgraph_nodes], max_distance=h)
 
-    if max_node_label_value is not None:
-        pruned_labels = np.array([np.minimum(label, max_node_label_value).tolist() for label in pruned_labels])
 
-    subgraph_size = len(pruned_subgraph_nodes)
-    enc_ratio = len(subgraph_nei_nodes_int) / (len(subgraph_nei_nodes_un) + 1e-3)
-    num_pruned_nodes = len(subgraph_nodes) - len(pruned_subgraph_nodes)
-
-    return pruned_subgraph_nodes, pruned_labels, subgraph_size, enc_ratio, num_pruned_nodes
+    return subgraph_nodes, labels, enclosing_subgraph_nodes, disconnected_nodes
 
