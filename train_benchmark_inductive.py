@@ -31,7 +31,7 @@ class Mem:
         self.add_ht_emb = True
         self.has_attn = True
         self.node_attn = True
-        self.sister_node_focus = False
+        self.sister_node_focus = True
         self.num_gcn_layers = 3
         self.num_bases = 2
         self.dropout = 0

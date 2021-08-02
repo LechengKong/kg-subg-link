@@ -44,6 +44,15 @@ class GraphClassifier(nn.Module):
 
         g_rep = g_out.view(-1, self.param_set_dim)
 
+        if self.params.sister_node_focus:
+            g.ndata['head_sister'] = g.ndata['head_sister'].unsqueeze(2)
+            g.ndata['tail_sister'] = g.ndata['tail_sister'].unsqueeze(2)
+            g_head_sister = mean_nodes(g, 'repr', 'head_sister')
+            g_tail_sister = mean_nodes(g, 'repr', 'tail_sister')
+            g_rep = torch.cat([g_rep,
+                               g_head_sister.view(-1, self.param_set_dim),
+                               g_tail_sister.view(-1, self.param_set_dim),], dim=1)
+
         if self.params.add_ht_emb:
             head_ids = (g.ndata['id'] == 1).nonzero().squeeze(1)
             head_embs = g.ndata['repr'][head_ids]
@@ -53,15 +62,6 @@ class GraphClassifier(nn.Module):
             g_rep = torch.cat([g_rep,
                                 head_embs.view(-1, self.param_set_dim),
                                tail_embs.view(-1, self.param_set_dim)], dim=1)
-
-        if self.params.sister_node_focus:
-            g.ndata['head_sister'] = g.ndata['head_sister'].unsqueeze(2)
-            g.ndata['tail_sister'] = g.ndata['tail_sister'].unsqueeze(2)
-            g_head_sister = mean_nodes(g, 'repr', 'head_sister')
-            g_tail_sister = mean_nodes(g, 'repr', 'tail_sister')
-            g_rep = torch.cat([g_rep,
-                               g_head_sister.view(-1, self.param_set_dim),
-                               g_tail_sister.view(-1, self.param_set_dim),], dim=1)
 
         g_rep = torch.cat([g_rep,
                             self.rel_emb(rel_labels)], dim=1)
