@@ -22,8 +22,8 @@ class Mem:
         self.aug_num_rels = 1315
         self.max_label_value = 10
         self.hop = 2
-        self.enclosing_sub_graph = False
-        self.node_path_only = False
+        self.enclosing_sub_graph = True
+        self.node_path_only = True
         self.max_nodes_per_hop = 30
         self.rel_emb_dim = 8
         self.emb_dim = 8
@@ -32,6 +32,7 @@ class Mem:
         self.has_attn = True
         self.node_attn = True
         self.sister_node_focus = True
+        self.use_neighbor_feature = True
         self.num_gcn_layers = 3
         self.num_bases = 2
         self.dropout = 0

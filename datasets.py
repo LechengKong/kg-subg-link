@@ -63,7 +63,15 @@ class SubgraphDataset(Dataset):
             label = label[enclosing_nodes]
         return nodes, label
 
+    def _get_neighbor_edge_ratio(self, subgraph, output_name):
+        # subgraph.ndata['edge_ratio'] = torch.tensor(np.zeros(subgraph.num_nodes(), self.num_rels))
+        subgraph.edata['type_onehot'] = torch.nn.functional.one_hot(subgraph.edata['type'].to(torch.int64), num_classes=self.num_rels).to(torch.float)
+        subgraph.update_all(dgl.function.copy_e('type_onehot','er'), dgl.function.mean('er',output_name))
+
     def _prepare_node_features(self, subgraph, n_labels, rel, n_feats=None):
+        if self.params.use_neighbor_feature:
+            self._get_neighbor_edge_ratio(subgraph, 'ratio')
+            n_feats = subgraph.ndata['ratio']
         near_edges = subgraph.out_edges(0,'all')
         sister_nodes = near_edges[1][subgraph.edata['type'][near_edges[2]] == rel]
         subgraph.ndata['tail_sister'] = torch.tensor(np.zeros((subgraph.num_nodes(),1)), dtype=torch.int32)
