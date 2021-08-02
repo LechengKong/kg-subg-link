@@ -203,13 +203,7 @@ def subgraph_extraction_labeling_wiki(ind, rel, A_incidence, h=1, enclosing_sub_
         subgraph_nodes = list(ind) + list(subgraph_nei_nodes_un)
 
     labels, enclosing_subgraph_nodes, disconnected_nodes = node_label(A_incidence[subgraph_nodes, :][:, subgraph_nodes], max_distance=h)
-    # pruned_subgraph_nodes = np.array(subgraph_nodes)[enclosing_subgraph_nodes].tolist()
-    # pruned_labels = labels[enclosing_subgraph_nodes]
-    pruned_subgraph_nodes = subgraph_nodes
-    pruned_labels = labels
 
-    if max_node_label_value is not None:
-        pruned_labels = np.array([np.minimum(label, max_node_label_value).tolist() for label in pruned_labels])
 
-    return pruned_subgraph_nodes, pruned_labels, disconnected_nodes
+    return subgraph_nodes, labels, enclosing_subgraph_nodes, disconnected_nodes
 
