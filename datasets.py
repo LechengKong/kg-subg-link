@@ -5,9 +5,19 @@ import torch
 import numpy as np
 import dgl
 import time
+import sys, os
 
 from torch.utils.data import Dataset
 from graph_util import  construct_graph_from_edges,subgraph_extraction_labeling_wiki, get_neighbor_nodes, extract_neighbor_nodes, sample_neg_link
+from scipy.linalg import eig, eigh
+
+# Disable
+def blockPrint():
+    sys.stdout = open(os.devnull, 'w')
+
+# Restore
+def enablePrint():
+    sys.stdout = sys.__stdout__
 
 
 class SubgraphDataset(Dataset):
@@ -36,8 +46,8 @@ class SubgraphDataset(Dataset):
     def __getitem__(self, index):
         raise NotImplementedError
 
-    def _get_main_subgraph(self, node_set):
-        sample_nodes = extract_neighbor_nodes(node_set, self.adj_mat, h=self.params.hop, max_nodes_per_hop=500)
+    def _get_main_subgraph(self, node_set, max_nodes):
+        sample_nodes = extract_neighbor_nodes(node_set, self.adj_mat, h=self.params.hop, max_nodes_per_hop=max_nodes)
         sample_nodes = list(node_set) + list(sample_nodes)
         main_subgraph = self.graph.subgraph(sample_nodes)
         main_subgraph.edata['type'] = self.graph.edata['type'][main_subgraph.edata[dgl.EID]]
@@ -57,11 +67,16 @@ class SubgraphDataset(Dataset):
         return ind_subgraph
     
     def _get_labels(self, head, tail, rel, adj):
-        nodes, label, enclosing_nodes, disconnected_nodes = subgraph_extraction_labeling_wiki([head, tail], rel, adj, h=self.params.hop, enclosing_sub_graph=self.params.enclosing_sub_graph, max_nodes_per_hop=self.params.max_nodes_per_hop)
+        nodes, label, enclosing_nodes, disconnected_nodes = subgraph_extraction_labeling_wiki([head, tail], rel, adj, h=self.params.hop, enclosing_sub_graph=self.params.intersection_nodes, max_nodes_per_hop=self.params.max_nodes_per_hop)
         if self.params.node_path_only:
             nodes = np.array(nodes)[enclosing_nodes].tolist()
             label = label[enclosing_nodes]
-        return nodes, label
+        if self.params.same_size_neighbor:
+            ind = np.concatenate([enclosing_nodes, disconnected_nodes])
+            # print(disconnected_nodes)
+            nodes = np.array(nodes)[ind].tolist()
+            label = label[ind]
+        return nodes, label, len(enclosing_nodes)
 
     def _get_neighbor_edge_ratio(self, subgraph, output_name):
         # subgraph.ndata['edge_ratio'] = torch.tensor(np.zeros(subgraph.num_nodes(), self.num_rels))
@@ -70,17 +85,26 @@ class SubgraphDataset(Dataset):
 
     def _prepare_node_features(self, subgraph, n_labels, rel, n_feats=None):
         if self.params.use_neighbor_feature:
-            self._get_neighbor_edge_ratio(subgraph, 'ratio')
             n_feats = subgraph.ndata['ratio']
         near_edges = subgraph.out_edges(0,'all')
-        sister_nodes = near_edges[1][subgraph.edata['type'][near_edges[2]] == rel]
+        # sister_nodes = near_edges[1][subgraph.edata['type'][near_edges[2]] == rel]
+        sister_nodes = near_edges[1]
         subgraph.ndata['tail_sister'] = torch.tensor(np.zeros((subgraph.num_nodes(),1)), dtype=torch.int32)
         subgraph.ndata['tail_sister'][sister_nodes] = 1
+        subgraph.ndata['tail_sister'][1] = 0
+        subgraph.ndata['tail_sister_type'] = torch.tensor(np.zeros((subgraph.num_nodes(),1)), dtype=torch.int32)
+        subgraph.ndata['tail_sister_type'][sister_nodes] = subgraph.edata['type'][near_edges[2]].unsqueeze(1)
+        subgraph.ndata['tail_sister_type'][1] = rel
 
         near_edges = subgraph.in_edges(1,'all')
-        sister_nodes = near_edges[0][subgraph.edata['type'][near_edges[2]] == rel]
+        # sister_nodes = near_edges[0][subgraph.edata['type'][near_edges[2]] == rel]
+        sister_nodes = near_edges[0]
         subgraph.ndata['head_sister'] = torch.tensor(np.zeros((subgraph.num_nodes(),1)), dtype=torch.int32)
         subgraph.ndata['head_sister'][sister_nodes] = 1
+        subgraph.ndata['head_sister'][0] = 0
+        subgraph.ndata['head_sister_type'] = torch.tensor(np.zeros((subgraph.num_nodes(),1)), dtype=torch.int32)
+        subgraph.ndata['head_sister_type'][sister_nodes] = subgraph.edata['type'][near_edges[2]].unsqueeze(1)
+        subgraph.ndata['head_sister_type'][0] = rel
         subgraph.ndata['t_label'] = torch.tensor(rel*np.ones((subgraph.num_nodes(),1)), dtype=torch.int32)
 
         n_nodes = subgraph.number_of_nodes()
@@ -99,13 +123,40 @@ class SubgraphDataset(Dataset):
 
         return subgraph
 
+    def _get_spectrum(self, graph):
+        if self.params.eig_size ==0 :
+            return []
+        adj_mat = graph.adjacency_matrix(transpose=False).to_dense().numpy()
+        # local_adj_mat = main_subgraph.adjacency_matrix(transpose=False, scipy_fmt='csr')
+        adj_mat += adj_mat.T
+        eig_val, _ = eig(adj_mat)
+        eig_val = np.real(eig_val)
+        ind = int(min(self.params.eig_size, len(eig_val)))
+        large_eig = np.argsort(np.abs(eig_val))[-ind::]
+        # print(eig_val)
+        eig_vec = np.zeros(self.params.eig_size)
+        # eig_vec[:ind] = np.real(eig_val[:ind])
+        eig_vec[:ind] = eig_val[large_eig[::-1]]
+        return eig_vec
+    
+    def _get_spectrum_graph(self, nodes, enc_nodes, target_rel, subgraph, labels, add_ht=True):
+        full_subg = self._get_ind_subgraph(nodes, target_rel, subgraph)
+        if add_ht:
+            full_subg.add_edges([0],[1])
+            full_subg.edata['type'][-1] = torch.tensor(target_rel, dtype=torch.int32)
+            full_subg.edata['label'][-1] = torch.tensor(target_rel, dtype=torch.int32)
+        spe = self._get_spectrum(full_subg)
+        sm_subg = self._get_ind_subgraph(nodes[:enc_nodes], target_rel, subgraph)
+
+        return sm_subg, spe, labels[:enc_nodes]
+
 
 
 class SubgraphDatasetTrain(SubgraphDataset):
     def __init__(self, triplets, dataset, params, adj_list, num_rels, num_entities, neg_link_per_sample=1):
         super().__init__(triplets, dataset, params, adj_list, num_rels, num_entities, None, neg_link_per_sample)
 
-        pos_g, pos_la, pos_rel, neg_g, neg_la, neg_rel = self.__getitem__(0)
+        pos_g, pos_la, pos_rel, neg_g, neg_la, neg_rel = self.__getitem__(113)
         self.n_feat_dim = pos_g.ndata['feat'].shape[1]
 
     def __len__(self):
@@ -118,10 +169,12 @@ class SubgraphDatasetTrain(SubgraphDataset):
         pos_link = [head, rel, tail]
         nodes = [pos_link[0], pos_link[2]]+[link[0] for link in neg_links] + [link[2] for link in neg_links]
         node_set = set(nodes)
-        main_subgraph, local_adj_mat, node_to_id = self._get_main_subgraph(node_set)
+        main_subgraph, local_adj_mat, node_to_id = self._get_main_subgraph(node_set, 500)
+        if self.params.use_neighbor_feature:
+            self._get_neighbor_edge_ratio(main_subgraph, 'ratio')
         local_adj_mat[node_to_id[pos_link[0]], node_to_id[pos_link[2]]]=0
         local_adj_mat[node_to_id[pos_link[2]], node_to_id[pos_link[0]]]=0  
-        pos_nodes, pos_label = self._get_labels(node_to_id[pos_link[0]], node_to_id[pos_link[2]], rel, local_adj_mat)
+        pos_nodes, pos_label, enc_nodes = self._get_labels(node_to_id[pos_link[0]], node_to_id[pos_link[2]], rel, local_adj_mat)
         local_adj_mat[node_to_id[pos_link[0]], node_to_id[pos_link[2]]]=1
         local_adj_mat[node_to_id[pos_link[2]], node_to_id[pos_link[0]]]=1
 
@@ -133,10 +186,12 @@ class SubgraphDatasetTrain(SubgraphDataset):
         #     print(rel)
         pos_subgraph = self._get_ind_subgraph(pos_nodes, rel, main_subgraph)
         pos_subgraph = self._prepare_node_features(pos_subgraph, pos_label, rel)
+        # print(pos_subgraph.edges())
         logging.debug(f'sample one:{time.time()-st}')
         neg_subgraphs = []
+        # blockPrint()
         for i in range(self.neg_sample):
-            neg_nodes, neg_label = self._get_labels(node_to_id[neg_links[i][0]], node_to_id[neg_links[i][2]], rel, local_adj_mat)
+            neg_nodes, neg_label, enc_nodes = self._get_labels(node_to_id[neg_links[i][0]], node_to_id[neg_links[i][2]], rel, local_adj_mat)
             neg_subgraph = self._get_ind_subgraph(neg_nodes, rel, main_subgraph)
             neg_subgraph = self._prepare_node_features(neg_subgraph, neg_label, rel)
             neg_subgraph.add_edges([0], [1])
@@ -164,22 +219,119 @@ class SubgraphDatasetVal(SubgraphDataset):
         pos_link = [head, rel, tail]
         nodes = [pos_link[0], pos_link[2]] + [link[0] for link in neg_links] + [link[2] for link in neg_links]
         node_set = set(nodes)
-        main_subgraph, local_adj_mat, node_to_id = self._get_main_subgraph(node_set)
+        main_subgraph, local_adj_mat, node_to_id = self._get_main_subgraph(node_set, 2500)
+        if self.params.use_neighbor_feature:
+            self._get_neighbor_edge_ratio(main_subgraph, 'ratio')
         can_edges = [pos_link]+neg_links
         graphs = []
         for i, edge in enumerate(can_edges):
-            pos_nodes, pos_label = self._get_labels(node_to_id[edge[0]], node_to_id[edge[2]], rel, local_adj_mat)
+            pos_nodes, pos_label, enc_nodes = self._get_labels(node_to_id[edge[0]], node_to_id[edge[2]], rel, local_adj_mat)
             # if i != 0:
             #     print(len(pos_nodes))
             # if i==0 and len(pos_nodes)==2 and not main_subgraph.has_edges_between(pos_nodes[0],pos_nodes[1]) and not main_subgraph.has_edges_between(pos_nodes[1],pos_nodes[0]):
-            #     print(rel)
+            #     print(index)
             pos_subgraph = self._get_ind_subgraph(pos_nodes, rel, main_subgraph)
             pos_subgraph = self._prepare_node_features(pos_subgraph, pos_label, rel)
             pos_subgraph.add_edges([0],[1])
             pos_subgraph.edata['type'][-1] = torch.tensor(rel, dtype=torch.int32)
             pos_subgraph.edata['label'][-1] = torch.tensor(rel, dtype=torch.int32)
+            # if index==43 and i==0:
+            #     print(pos_subgraph.edges())
+            #     print(pos_subgraph.edata['type'])
             graphs.append(pos_subgraph)
         return graphs, [rel]*len(graphs), 0
+
+class SubgraphDatasetSpeTrain(SubgraphDataset):
+    def __init__(self, triplets, dataset, params, adj_list, num_rels, num_entities, neg_link_per_sample=1):
+        super().__init__(triplets, dataset, params, adj_list, num_rels, num_entities, None, neg_link_per_sample)
+
+        pos_g, pos_la, pos_rel, pos_spe, neg_g, neg_la, neg_rel, neg_spe = self.__getitem__(113)
+        self.n_feat_dim = pos_g.ndata['feat'].shape[1]
+
+    def __len__(self):
+        return self.sample_size
+
+    def __getitem__(self, index):
+        st = time.time()
+        head, rel, tail = self.edges[index]
+        neg_links = sample_neg_link(self.coo_adj_list, rel, head, tail, self.num_nodes, self.neg_sample)
+        pos_link = [head, rel, tail]
+        nodes = [pos_link[0], pos_link[2]]+[link[0] for link in neg_links] + [link[2] for link in neg_links]
+        node_set = set(nodes)
+        main_subgraph, local_adj_mat, node_to_id = self._get_main_subgraph(node_set, 500)
+        if self.params.use_neighbor_feature:
+            self._get_neighbor_edge_ratio(main_subgraph, 'ratio')
+        local_adj_mat[node_to_id[pos_link[0]], node_to_id[pos_link[2]]]=0
+        local_adj_mat[node_to_id[pos_link[2]], node_to_id[pos_link[0]]]=0  
+        pos_nodes, pos_label, enc_nodes = self._get_labels(node_to_id[pos_link[0]], node_to_id[pos_link[2]], rel, local_adj_mat)
+        local_adj_mat[node_to_id[pos_link[0]], node_to_id[pos_link[2]]]=1
+        local_adj_mat[node_to_id[pos_link[2]], node_to_id[pos_link[0]]]=1
+
+        # if len(pos_nodes) == 2:
+        #     print("Err")
+        # print(pos_nodes)
+        # print(len(pos_nodes))
+        # if len(pos_nodes)==2 and not main_subgraph.has_edges_between(pos_nodes[1],pos_nodes[0]):
+        #     print(rel)
+        pos_subgraph, pos_spe, pos_label = self._get_spectrum_graph(pos_nodes, enc_nodes, rel, main_subgraph, pos_label,False) 
+        pos_subgraph = self._prepare_node_features(pos_subgraph, pos_label, rel)
+        logging.debug(f'sample one:{time.time()-st}')
+        # print(pos_subgraph.num_nodes())
+        neg_subgraphs = []
+        neg_spes = []
+        for i in range(self.neg_sample):
+            neg_nodes, neg_label, enc_nodes = self._get_labels(node_to_id[neg_links[i][0]], node_to_id[neg_links[i][2]], rel, local_adj_mat)
+            neg_subgraph, neg_spe, neg_label = self._get_spectrum_graph(neg_nodes, enc_nodes, rel, main_subgraph, neg_label)
+            neg_subgraph = self._prepare_node_features(neg_subgraph, neg_label, rel)
+            neg_subgraph.add_edges([0], [1])
+            neg_subgraph.edata['type'][-1] = torch.tensor(neg_links[i][1], dtype=torch.int32)
+            neg_subgraph.edata['label'][-1] = torch.tensor(neg_links[i][1], dtype=torch.int32)
+            neg_subgraphs.append(neg_subgraph)
+            neg_spes.append(neg_spe)
+
+        logging.debug(f'sampleall:{time.time()-st}')
+        return pos_subgraph, 1, pos_link[1], pos_spe, neg_subgraphs, [0] * len(neg_subgraphs), [neg_links[i][1] for i in
+                                                                                       range(len(neg_subgraphs))], neg_spes
+
+class SubgraphDatasetSpeVal(SubgraphDataset):
+    def __init__(self, triplets, dataset, params, adj_list, num_rels, num_entities, graph=None, neg_link_per_sample=1):
+        super().__init__(triplets, dataset, params, adj_list, num_rels, num_entities, graph, neg_link_per_sample)
+
+        self.__getitem__(0)
+
+    def __len__(self):
+        return self.sample_size
+
+    def __getitem__(self, index):
+        # st = time.time()
+        head, rel, tail = self.edges[index]
+        neg_links = sample_neg_link(self.coo_adj_list, rel, head, tail, self.num_nodes, self.neg_sample)
+        pos_link = [head, rel, tail]
+        nodes = [pos_link[0], pos_link[2]] + [link[0] for link in neg_links] + [link[2] for link in neg_links]
+        node_set = set(nodes)
+        main_subgraph, local_adj_mat, node_to_id = self._get_main_subgraph(node_set, 2500)
+        if self.params.use_neighbor_feature:
+            self._get_neighbor_edge_ratio(main_subgraph, 'ratio')
+        can_edges = [pos_link]+neg_links
+        graphs = []
+        spes = []
+        for i, edge in enumerate(can_edges):
+            pos_nodes, pos_label, enc_nodes = self._get_labels(node_to_id[edge[0]], node_to_id[edge[2]], rel, local_adj_mat)
+            # if i != 0:
+            #     print(len(pos_nodes))
+            # if i==0 and len(pos_nodes)==2 and not main_subgraph.has_edges_between(pos_nodes[0],pos_nodes[1]) and not main_subgraph.has_edges_between(pos_nodes[1],pos_nodes[0]):
+            #     print(index)
+            pos_subgraph, pos_spe, pos_label = self._get_spectrum_graph(pos_nodes, enc_nodes, rel, main_subgraph, pos_label) 
+            pos_subgraph = self._prepare_node_features(pos_subgraph, pos_label, rel)
+            pos_subgraph.add_edges([0],[1])
+            pos_subgraph.edata['type'][-1] = torch.tensor(rel, dtype=torch.int32)
+            pos_subgraph.edata['label'][-1] = torch.tensor(rel, dtype=torch.int32)
+            # if index==43 and i==0:
+            #     print(pos_subgraph.edges())
+            #     print(pos_subgraph.edata['type'])
+            graphs.append(pos_subgraph)
+            spes.append(pos_spe)
+        return graphs, [rel]*len(graphs), 0, spes
 
 
 class SubgraphDatasetWikiOnlineValSubset(Dataset):

@@ -5,7 +5,7 @@ import numpy as np
 
 base_dir = '/project/tantra/jerry.kong/ogb_project/ogb-grail-mod/data'
 
-file_path = "WN18RR_v1"
+file_path = "fb237_v4"
 
 output_path = file_path+"_resample"
 

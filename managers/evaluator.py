@@ -22,7 +22,7 @@ class Evaluator():
         h10_scores = []
         all_labels = []
         pre_scores = []
-        # h10_list = []
+        h10_list = []
         if save:
             dataloader = DataLoader(self.data, batch_size=self.params.val_batch_size, num_workers=self.params.num_workers, collate_fn=self.params.collate_fn_val, prefetch_factor=self.params.prefetch_val, pin_memory=True)
             num_batches = len(dataloader)
@@ -61,7 +61,7 @@ class Evaluator():
                         ranking = np.argsort(scores, axis=1)
                         h10_ranking = ranking[:,-10:]
                         true_ranking = np.sum(h10_ranking==tp[:,np.newaxis], axis=1)
-                        # h10_list += true_ranking.tolist()
+                        h10_list += true_ranking.tolist()
                         h10_scores.append(np.mean(true_ranking))
                         mrr_scores.append(metrics.label_ranking_average_precision_score(true_labels, scores))
                         all_labels += true_labels[np.arange(b_size), tp].tolist()
@@ -102,4 +102,7 @@ class Evaluator():
             if len(h10_scores)!=0:
                 h10 /= len(h10_scores)
             auc_pr = metrics.average_precision_score(all_labels, pre_scores)
-            return {'mrr': mrr, 'h10': h10, 'apr':auc_pr}
+            if self.params.return_pred_res:
+                return {'mrr': mrr, 'h10': h10, 'apr':auc_pr, 'h10l': np.array(h10_list)}
+            else:
+                return {'mrr': mrr, 'h10': h10, 'apr':auc_pr}

@@ -22,6 +22,7 @@ class Trainer():
 
         model_params = list(self.graph_classifier.parameters())
         logging.info('Total number of parameters: %d' % sum(map(lambda x: x.numel(), model_params)))
+        # print(graph_classifier)
 
         if params.optimizer == "SGD":
             self.optimizer = optim.SGD(model_params, lr=params.lr, momentum=params.momentum, weight_decay=self.params.l2)
@@ -63,44 +64,43 @@ class Trainer():
             data_pos, targets_pos, data_neg, targets_neg = self.params.move_batch_to_device(batch, self.params.device)
             self.optimizer.zero_grad()
             # print("move",time.time()-vs)
-            try:
-                score_pos = self.graph_classifier(data_pos)
-                score_neg = self.graph_classifier(data_neg)
-                loss = self.criterion(score_pos, score_neg.view(len(score_pos), -1).mean(dim=1), torch.Tensor([1]).to(device=self.params.device))
-            # print(score_pos, score_neg, loss)
-                loss.backward()
-                self.optimizer.step()
-                with torch.no_grad():
-                    pos_arr = score_pos.cpu().numpy()
-                    neg_arr = score_neg.cpu().numpy()
-                    neg_arr = neg_arr.reshape((len(pos_arr),-1))
-                    score_mat = np.zeros((len(pos_arr), neg_arr.shape[1]+1))
-                    score_mat[:,0] = pos_arr.flatten()
-                    score_mat[:,1:] = neg_arr
-                    target_mat = np.zeros(score_mat.shape)
-                    target_mat[:,0] = 1
-                    mrr_score+=metrics.label_ranking_average_precision_score(target_mat, score_mat)
-                    total_loss += loss.item()
-            except RuntimeError:
-                print("oom")
-                torch.cuda.empty_cache()
-                continue
+            # try:
+            score_pos = self.graph_classifier(data_pos)
+            score_neg = self.graph_classifier(data_neg)
+            loss = self.criterion(score_pos, score_neg.view(len(score_pos), -1).mean(dim=1), torch.Tensor([1]).to(device=self.params.device))
+        # print(score_pos, score_neg, loss)
+            loss.backward()
+            self.optimizer.step()
+            with torch.no_grad():
+                pos_arr = score_pos.cpu().numpy()
+                neg_arr = score_neg.cpu().numpy()
+                neg_arr = neg_arr.reshape((len(pos_arr),-1))
+                score_mat = np.zeros((len(pos_arr), neg_arr.shape[1]+1))
+                score_mat[:,0] = pos_arr.flatten()
+                score_mat[:,1:] = neg_arr
+                target_mat = np.zeros(score_mat.shape)
+                target_mat[:,0] = 1
+                mrr_score+=metrics.label_ranking_average_precision_score(target_mat, score_mat)
+                total_loss += loss.item()
+            # except RuntimeError:
+            #     print("oom")
+            #     torch.cuda.empty_cache()
+            #     continue
             # print("run", time.time()-vs)
 
             # print("mis", time.time()-vs)
             # vs = time.time()
                 
         self.updates_counter += 1
-        del dataloader
         if self.valid_evaluator and self.params.eval_every_iter and self.updates_counter % self.params.eval_every_iter == 0:
             # print('should eval')
             tic = time.time()
             result = self.valid_evaluator.eval()
             print('\nPerformance:' + str(result) + 'in ' + str(time.time() - tic))
 
-            if result['h10'] >= self.best_metric:
+            if result['mrr'] >= self.best_metric:
                 self.save_classifier()
-                self.best_metric = result['h10']
+                self.best_metric = result['mrr']
                 self.not_improved_count = 0
 
             else:
