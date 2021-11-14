@@ -7,8 +7,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from .layers import RGCNBasisLayer as RGCNLayer
+# from .layers import RGCNMemLayer as RGCNLayer
 
-from .aggregators import SumAggregator, MLPAggregator, GRUAggregator
+from .aggregators import SumAggregator, MLPAggregator, GRUAggregator, MemAggregator, RepAggregator
 
 
 class RGCN(nn.Module):
@@ -31,7 +32,7 @@ class RGCN(nn.Module):
         self.device = params.device
 
         if self.has_attn:
-            self.attn_rel_emb = nn.Embedding(self.num_rels, self.attn_rel_emb_dim, sparse=False)
+            self.attn_rel_emb = nn.Embedding(self.aug_num_rels, self.attn_rel_emb_dim, sparse=False)
         else:
             self.attn_rel_emb = None
 
@@ -42,6 +43,10 @@ class RGCN(nn.Module):
             self.aggregator = MLPAggregator(self.emb_dim)
         elif params.gnn_agg_type == "gru":
             self.aggregator = GRUAggregator(self.emb_dim)
+        elif params.gnn_agg_type == "mem":
+            self.aggregator = MemAggregator(self.emb_dim)
+        elif params.gnn_agg_type == "rep":
+            self.aggregator = RepAggregator(self.emb_dim)
 
         # initialize basis weights for input and hidden layers
         # self.input_basis_weights = nn.Parameter(torch.Tensor(self.num_bases, self.inp_dim, self.emb_dim))

@@ -31,7 +31,7 @@ class Evaluator():
             file_n = 0
             batch_count = 0
         else:
-            # dataloader = DataLoader(self.data, batch_size=self.params.val_batch_size, num_workers=self.params.num_workers, collate_fn=self.params.collate_fn_val, prefetch_factor=self.params.prefetch_val, pin_memory=True , sampler=RandomSampler(self.data, replacement=False, num_samples=self.params.val_size))
+            # dataloader = DataLoader(self.data, batch_size=self.params.val_batch_size, num_workers=self.params.num_workers, collate_fn=self.params.collate_fn_val, prefetch_factor=self.params.prefetch_val, pin_memory=True , sampler=RandomSampler(self.data, replacement=True, num_samples=self.params.val_size))
             dataloader = DataLoader(self.data, batch_size=self.params.val_batch_size, num_workers=self.params.num_workers, collate_fn=self.params.collate_fn_val, prefetch_factor=self.params.prefetch_val, pin_memory=True )
         # vs = time.time()
         self.graph_classifier.eval()

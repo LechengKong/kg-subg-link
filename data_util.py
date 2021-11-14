@@ -53,12 +53,12 @@ def process_files(files, relation2id=None):
         else:
             adj_list.append(csr_matrix((np.ones(len(rel_mat)),(rel_array[:,0],rel_array[:,1])), shape=(len(entity2id),len(entity2id))))
 
-    count = 0
-    for test_trip in converted_triplets['test']:
-        for train_tip in converted_triplets['train']:
-            if test_trip[2]==train_tip[0] and test_trip[0] == train_tip[2]:
-                count+=1
-    print(count)
+    # count = 0
+    # for test_trip in converted_triplets['test']:
+    #     for train_tip in converted_triplets['train']:
+    #         if test_trip[2]==train_tip[0] and test_trip[0] == train_tip[2]:
+    #             count+=1
+    # print(count)
 
 
     return adj_list, converted_triplets, entity2id, relation2id, id2entity, id2relation

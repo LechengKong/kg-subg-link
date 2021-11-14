@@ -98,6 +98,76 @@ class RGCNBasisLayer(RGCNLayer):
         # self.weight = basis_weights
         self.weight = nn.Parameter(torch.Tensor(self.num_bases, self.inp_dim, self.out_dim))
         self.w_comp = nn.Parameter(torch.Tensor(self.num_rels, self.num_bases))
+        # self.message_condenser = nn.Linear(self.out_dim, int(self.out_dim/4))
+
+        if self.has_attn:
+            self.A = nn.Linear(2 * self.inp_dim + self.attn_rel_emb_dim, inp_dim)
+            self.B = nn.Linear(inp_dim, 1)
+
+        self.self_loop_weight = nn.Parameter(torch.Tensor(self.inp_dim, self.out_dim))
+
+        nn.init.xavier_uniform_(self.self_loop_weight, gain=nn.init.calculate_gain('relu'))
+        nn.init.xavier_uniform_(self.weight, gain=nn.init.calculate_gain('relu'))
+        nn.init.xavier_uniform_(self.w_comp, gain=nn.init.calculate_gain('relu'))
+
+    def propagate(self, g, attn_rel_emb=None):
+        # generate all weights from bases
+        weight = self.weight.view(self.num_bases,
+                                  self.inp_dim * self.out_dim)
+        weight = torch.matmul(self.w_comp, weight).view(
+            self.num_rels, self.inp_dim, self.out_dim)
+
+        g.edata['w'] = self.edge_dropout(torch.ones(g.number_of_edges(), 1).to(weight.device))
+
+        input_ = 'feat' if self.is_input_layer else 'h'
+
+        def msg_func(edges):
+            w = weight.index_select(0, edges.data['type'])
+            msg = edges.data['w'] * torch.bmm(edges.src[input_].unsqueeze(1), w).squeeze(1)
+            curr_emb = torch.mm(edges.dst[input_], self.self_loop_weight)  # (B, F)
+
+            if self.has_attn:
+                e = torch.cat([edges.src[input_], edges.dst[input_], attn_rel_emb(edges.data['type'])], dim=1)
+                a = torch.sigmoid(self.B(F.relu(self.A(e))))
+            else:
+                a = torch.ones((len(edges), 1)).to(device=w.device)
+
+            return {'curr_emb': curr_emb, 'msg': msg, 'alpha': a, 'init_feat': edges.src['feat']}
+
+        g.update_all(msg_func, self.aggregator, None)
+
+
+class RGCNMemLayer(RGCNLayer):
+    def __init__(self, inp_dim, out_dim, aggregator, attn_rel_emb_dim, num_rels, num_bases=-1, bias=None,
+                 activation=None, dropout=0.0, edge_dropout=0.0, is_input_layer=False, has_attn=False):
+        super(
+            RGCNMemLayer,
+            self).__init__(
+            inp_dim,
+            out_dim,
+            aggregator,
+            bias,
+            activation,
+            dropout=dropout,
+            edge_dropout=edge_dropout,
+            is_input_layer=is_input_layer)
+        self.inp_dim = inp_dim
+        self.out_dim = out_dim
+        self.attn_rel_emb_dim = attn_rel_emb_dim
+        self.num_rels = num_rels
+        self.num_bases = num_bases
+        self.is_input_layer = is_input_layer
+        self.has_attn = has_attn
+
+        if self.num_bases <= 0 or self.num_bases > self.num_rels:
+            self.num_bases = self.num_rels
+
+        # add basis weights
+        # self.weight = basis_weights
+        self.weight = nn.Parameter(torch.Tensor(self.num_bases, self.inp_dim, self.out_dim))
+        self.w_comp = nn.Parameter(torch.Tensor(self.num_rels, self.num_bases))
+
+        self.rel_emb = nn.Embedding(self.num_rels, self.out_dim, sparse=False)
 
         if self.has_attn:
             self.A = nn.Linear(2 * self.inp_dim + 2 * self.attn_rel_emb_dim, inp_dim)
@@ -131,6 +201,6 @@ class RGCNBasisLayer(RGCNLayer):
             else:
                 a = torch.ones((len(edges), 1)).to(device=w.device)
 
-            return {'curr_emb': curr_emb, 'msg': msg, 'alpha': a}
+            return {'curr_emb': curr_emb, 'msg': msg, 'alpha': a, 'nei_node_mem':edges.src['node_mem'], 'nei_rel_mem':edges.src['rel_mem'], 'curr_node_mem': edges.dst['node_mem'], 'curr_rel_mem': edges.dst['rel_mem'], 'head_emb':edges.src[input_], 'head_rel_emb': self.rel_emb(edges.data['type'])}
 
         g.update_all(msg_func, self.aggregator, None)

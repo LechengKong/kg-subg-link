@@ -5,12 +5,14 @@ import os.path as osp
 import logging
 
 from data_util import process_files
-from datasets import SubgraphDatasetTrain, SubgraphDatasetVal, SubgraphDatasetSpeVal, SubgraphDatasetSpeTrain
+from datasets import SubgraphDatasetWhole, SubgraphDatasetOnlyLink, MultiSampleDataset
 from torch_util import set_data_passing
 from model.dgl.graph_classifier import GraphClassifier as dgl_model
 from model.dgl.graph_classifier import GraphClassifierSpe as spe_dgl_model
-from managers.trainer import Trainer
-from managers.evaluator import Evaluator
+from model.dgl.graph_classifier import GraphClassifierWhole as whole_dgl_model
+from managers.trainer_whole import Trainer
+from managers.evaluator_whole import Evaluator, EvaluatorVarLen
+from graph_util import *
 
 class Mem:
 
@@ -25,42 +27,47 @@ class Mem:
         self.hop = 3
         self.intersection_nodes = True
         self.node_path_only = True
-        self.same_size_neighbor = True
+        self.same_size_neighbor = False
         self.max_nodes_per_hop = 15
         self.train_max_n = 500
         self.test_max_n = 25000
-        self.rel_emb_dim = 96
-        self.emb_dim = 96
-        self.attn_rel_emb_dim = 96
+        self.rel_emb_dim = 64
+        self.emb_dim = 64
+        self.attn_rel_emb_dim = 64
+        self.lstm_hidden_size = 64
         self.add_ht_emb = True
         self.has_attn = False
         self.node_attn = False
         self.sister_node_focus = False
         self.use_neighbor_feature = False
-        self.num_gcn_layers = 3
+        self.num_gcn_layers = 6
         self.num_bases = 4
-        self.dropout = 0
-        self.edge_dropout = 0
+        self.dropout = 0.25
+        self.edge_dropout = 0.25
         self.gnn_agg_type = 'sum'
         self.optimizer = 'Adam'
         self.lr = 0.001
-        self.l2 = 1e-2
-        self.batch_size = 16
-        self.num_workers = 32
-        self.num_epochs = 20
+        self.l2 = 1e-4
+        self.batch_size = 64
+        self.num_workers = 0
+        self.num_epochs = 50
         self.save_every = 1
         self.eval_every_iter = 1
-        self.margin = 5
+        self.margin = 15
         self.train_edges = 25901
         self.val_size = 1000
-        self.early_stop = 3
-        self.val_batch_size = 4
+        self.train_neg_sample_size = 16
+        self.val_neg_sample_size = 50
+        self.sample_graph_ratio = 0.5
+        self.early_stop = 100
+        self.shortest_path_dist = 30
+        self.val_batch_size = 1
         self.prefetch_val = 2
         self.return_pred_res = False
         self.retrain = False
-        self.eval = True
-        self.retrain_seed = 114
-        self.model_name = "graph_classifier_att_sm_ind"
+        self.eval = False
+        self.retrain_seed = 113
+        self.model_name = "lstm_gnn_tst" #"lstm_gnn"fbv1 "lstm_gnn_of" fbv1 random
         self.use_data = ["train", "test", "valid"]
         self.device = torch.device('cpu')
         self.eig_size = 20
@@ -68,7 +75,17 @@ class Mem:
         self.simple_net = False
         self.use_root_dist = False
         self.whole_graph = False
-        self.only_link_sample = False
+        self.only_link_sample = True
+        self.use_random_labels = False
+        self.batch_random = True
+        self.concat_init_feat = True
+        self.label_reg = True
+        self.use_label_pred_out = False
+        self.use_mid_repr = True
+        self.eval_sample_method = sample_neg_link
+        self.multisample_dataset = True
+        self.use_lstm = True
+        self.res_save_name = ("rand_" if self.use_random_labels else "")+("reg_" if self.label_reg else "")+("batchr_" if self.batch_random else "")+"metricmean"
 
 
 if __name__ == '__main__':
@@ -78,10 +95,14 @@ if __name__ == '__main__':
         torch.manual_seed(params.retrain_seed)
         random.seed(params.retrain_seed)
         np.random.seed(params.retrain_seed)
+    # elif not params.eval:
+    #     torch.manual_seed(11)
+    #     random.seed(11)
+    #     np.random.seed(11)
     elif not params.eval:
-        torch.manual_seed(11)
-        random.seed(11)
-        np.random.seed(11)
+        torch.manual_seed(8)
+        random.seed(8)
+        np.random.seed(8)
 
     if torch.cuda.is_available():
         params.device = torch.device('cuda:0')
@@ -124,36 +145,42 @@ if __name__ == '__main__':
     ind_num_entities = len(entity2id_ind)
     ind_num_rel = len(relation2id_ind)
     print(f'Dataset {params.ind_data_set} has {ind_num_entities} entities and {ind_num_rel} relations')
-
-    # params.collate_fn = collate_dgl
-    # params.collate_fn_val = collate_dgl_val
-    # params.move_batch_to_device = move_batch_to_device_dgl
-    # params.move_batch_to_device_val = move_batch_to_device_dgl_val
     set_data_passing(params)
     torch.multiprocessing.set_sharing_strategy('file_system')
-    if params.use_spe:
-        TrainSet = SubgraphDatasetSpeTrain
-        TestSet = SubgraphDatasetSpeVal
+    if params.only_link_sample:
+        TrainSet = SubgraphDatasetOnlyLink
+        TestSet = SubgraphDatasetOnlyLink
     else:
-        TrainSet = SubgraphDatasetTrain
-        TestSet = SubgraphDatasetVal
+        TrainSet = SubgraphDatasetWhole
+        TestSet = SubgraphDatasetWhole
 
-    train = TrainSet(converted_triplets, 'valid', params, adj_list, train_num_rel, train_num_entities, neg_link_per_sample=1)
+    if params.multisample_dataset:
+        TrainSet = MultiSampleDataset
+
+    train = TrainSet(converted_triplets, 'train', params, adj_list, train_num_rel, train_num_entities, ratio=params.sample_graph_ratio, neg_link_per_sample=params.train_neg_sample_size)
     if params.eval:
-        val = TestSet(converted_triplets_ind, 'test', params, adj_list_ind, ind_num_rel, ind_num_entities, neg_link_per_sample=50)
+        # val = TrainSet(converted_triplets, 'train', params, adj_list, train_num_rel, train_num_entities, ratio=params.sample_graph_ratio, neg_link_per_sample=50)
+        val = TestSet(converted_triplets_ind, 'test', params, adj_list_ind, ind_num_rel, ind_num_entities, neg_link_per_sample=params.val_neg_sample_size, sample_method=params.eval_sample_method)
+        # val = TestSet(converted_triplets, 'valid', params, adj_list, train_num_rel, train_num_entities, neg_link_per_sample=params.val_neg_sample_size)
+        # val.save_dist()
     else:
-        val = TestSet(converted_triplets_ind, 'test', params, adj_list_ind, ind_num_rel, ind_num_entities, neg_link_per_sample=50)
-        # val = TestSet(converted_triplets, 'test', params, adj_list, train_num_rel, train_num_entities, neg_link_per_sample=50)
+        # val = TestSet(converted_triplets_ind, 'valid', params, adj_list_ind, ind_num_rel, ind_num_entities, neg_link_per_sample=50)
+        val = TestSet(converted_triplets_ind, 'test', params, adj_list_ind, ind_num_rel, ind_num_entities, neg_link_per_sample=params.val_neg_sample_size, sample_method=params.eval_sample_method)
     params.train_edges = len(train)
     params.val_size = len(val)
     print(f'Training set has {params.train_edges} edges, Val set has {params.val_size} edges')
     params.inp_dim = train.n_feat_dim
     if params.use_neighbor_feature:
         params.inp_dim += params.rel_emb_dim
-    if params.use_spe:
-        graph_classifier = spe_dgl_model(params, relation2id).to(device=params.device)
-    else:
-        graph_classifier = dgl_model(params, relation2id).to(device=params.device)
+
+    params2 = Mem()
+    params2.inp_dim = 1
+    params2.emb_dim = 32
+    params2.attn_rel_emb_dim = 32
+    params2.dropout = 0.5
+    params2.edge_dropout = 0.5
+    
+    graph_classifier = whole_dgl_model(params, params2, relation2id).to(device=params.device)
 
     state_d = None
     if params.retrain:
@@ -163,7 +190,7 @@ if __name__ == '__main__':
         params.return_pred_res = True
         state_d = torch.load(osp.join(params.root_path, "best_"+params.model_name+".pth"), map_location=params.device)
         graph_classifier.load_state_dict(state_d['state_dict'])
-        validator = Evaluator(params, graph_classifier, val)
+        validator = EvaluatorVarLen(params, graph_classifier, val)
         n=1
         mrr = []
         h10 = []
@@ -176,8 +203,8 @@ if __name__ == '__main__':
         print(mrr, np.mean(np.array(mrr)))
         print(h10, np.mean(np.array(h10)))
         print(apr, np.mean(np.array(apr)))
-        np.save('el', res['h10l'])
+        np.save('el2', res['h10l'])
     else:
-        validator = Evaluator(params, graph_classifier, val)
+        validator = EvaluatorVarLen(params, graph_classifier, val)
         trainer = Trainer(params, graph_classifier, train, state_dict=state_d, valid_evaluator=validator)
         trainer.train()
