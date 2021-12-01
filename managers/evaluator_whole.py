@@ -1,4 +1,5 @@
 import os
+from networkx.algorithms.link_prediction import preferential_attachment
 import numpy as np
 import torch
 import pdb
@@ -8,6 +9,7 @@ from torch.utils.data import DataLoader, RandomSampler
 from tqdm import tqdm
 from sklearn import metrics
 import time
+from util import SmartTimer
 
 
 class Evaluator():
@@ -36,13 +38,13 @@ class Evaluator():
         else:
             # dataloader = DataLoader(self.data, batch_size=self.params.val_batch_size, num_workers=self.params.num_workers, collate_fn=self.params.collate_fn_val, prefetch_factor=self.params.prefetch_val, pin_memory=True , sampler=RandomSampler(self.data, replacement=True, num_samples=self.params.val_size))
             dataloader = DataLoader(self.data, batch_size=self.params.val_batch_size, num_workers=self.params.num_workers, collate_fn=self.params.collate_fn, prefetch_factor=self.params.prefetch_val, pin_memory=True )
-        # vs = time.time()
         self.graph_classifier.eval()
         with torch.no_grad():
             g = self.data.graph.to(self.params.device)
             h = self.graph_classifier.graph_update(g)
             pbar = tqdm(dataloader)
             d_l = []
+            v = time.time()
             for b_num, batch in enumerate(pbar):
                 data = self.params.move_batch_to_device(batch, self.params.device)
                 d_l.append(data[1][0].item())
@@ -97,54 +99,85 @@ class Evaluator():
 
 
 class EvaluatorVarLen():
-    def __init__(self, params, graph_classifier, data):
+    def __init__(self, params, graph_classifier, data_list):
         self.params = params
         self.graph_classifier = graph_classifier
-        self.data = data
+        self.data_list = data_list
+        self.timer = SmartTimer(False)
         # self.g = self.data.graph.to(params.device)
 
-    def eval(self, save=False):
+    def eval_data(self, data, rep=10, save=False):
         # print("eval")
-        all_rankings = []
         if self.params.use_random_labels:
-            self.data.re_label()
-        dataloader = DataLoader(self.data, batch_size=self.params.val_batch_size, num_workers=self.params.num_workers, collate_fn=self.params.collate_fn)
-        # dataloader = DataLoader(self.data, batch_size=self.params.val_batch_size, num_workers=self.params.num_workers, collate_fn=self.params.collate_fn, sampler =RandomSampler(self.data, replacement=True,num_samples=self.params.val_size))
+            data.re_label()
+        dataloader = DataLoader(data, batch_size=self.params.val_batch_size, num_workers=self.params.num_workers, collate_fn=self.params.collate_fn, prefetch_factor=2, pin_memory=True)
+        # dataloader = DataLoader(self.data, batch_size=self.params.val_batch_size, num_workers=self.params.num_workers, collate_fn=self.params.collate_fn, sampler =RandomSampler(self.data, replacement=True,num_samples=10))
         # sampler = RandomSampler(self.data, num_samples=10)
         self.graph_classifier.eval()
         with torch.no_grad():
-            g = self.data.graph.to(self.params.device)
+            g = data.graph.to(self.params.device)
             h = self.graph_classifier.graph_update(g)
             pbar = tqdm(dataloader)
             d_l = []
-            for b_num, batch in enumerate(pbar):
-                data = self.params.move_batch_to_device(batch, self.params.device)
-                d_l.append(data[1][0].item())
-                # print(d_l[-1])
-                if self.params.only_link_sample:
-                    # g = self.data.graph.to(self.params.device)
-                    # score_pos = self.graph_classifier((g,data))
-                    score_pos,h_pred, t_pred, h_true, t_true = self.graph_classifier.mlp_update(g, data[0], data[1],data[2],h)
-                    # print(torch.sum((h_pred[0]-h_true[0])**2).item())
-                    # print('hp',h_pred[0])
-                    # print('ht',h_true[0])
-                else:
-                    score_pos = self.graph_classifier(data)
-                scores = score_pos.cpu().numpy().flatten()
-                batch_len = data[3].cpu().numpy()
-                cur_head_pointer = 0
-                for bl in batch_len:
-                    next_hp = cur_head_pointer+bl
-                    b_score = scores[cur_head_pointer:next_hp]
-                    cur_head_pointer = next_hp
-                    order = np.argsort(b_score)
-                    all_rankings.append(len(order)-np.where(order==0)[0][0])
-        all_rankings = np.array(all_rankings)
-        # print(all_rankings)
-        h10 = np.mean(all_rankings<=10)
-        mrr = np.mean(1/all_rankings)
-        np.save('dist', np.array(d_l))
-        if self.params.return_pred_res:
-            return {'mrr': mrr, 'h10': h10, 'apr':0, 'h10l': (all_rankings<=10).astype(int)}
-        else:
-            return {'mrr': mrr, 'h10': h10, 'apr':0}
+            h10list = []
+            mrrlist = []
+            for i in range(rep):
+                all_rankings = []
+                self.timer.record()
+                for b_num, batch in enumerate(pbar):
+                    self.timer.cal_and_update('data')
+                    sp = batch.ls
+                    data = self.params.move_batch_to_device(sp, self.params.device)
+                    self.timer.cal_and_update('move')
+                    d_l.append(data[1].cpu().numpy())
+                    # print(d_l[-1])
+                    if self.params.only_link_sample:
+                        # g = self.data.graph.to(self.params.device)
+                        # score_pos = self.graph_classifier((g,data))
+                        score_pos,h_pred, t_pred, h_true, t_true = self.graph_classifier.mlp_update(g, data[0], data[1],data[2],h)
+                        # print(torch.sum((h_pred[0]-h_true[0])**2).item())
+                        # print('hp',h_pred[0])
+                        # print('ht',h_true[0])
+                    else:
+                        score_pos = self.graph_classifier(data)
+                    self.timer.cal_and_update('model')
+                    scores = score_pos.cpu().numpy().flatten()
+                    self.timer.cal_and_update('scdetach')
+                    batch_len = data[3].cpu().numpy()
+                    self.timer.cal_and_update('detach')
+                    cur_head_pointer = 0
+                    for bl in batch_len:
+                        next_hp = cur_head_pointer+bl
+                        b_score = scores[cur_head_pointer:next_hp]
+                        cur_head_pointer = next_hp
+                        order = np.argsort(b_score)
+                        all_rankings.append(len(order)-np.where(order==0)[0][0])
+                    self.timer.cal_and_update('mis')
+                all_rankings = np.array(all_rankings)
+                # print(all_rankings)
+                np.save('ark',all_rankings)
+                h10 = np.mean(all_rankings<=10)
+                mrr = np.mean(1/all_rankings)
+                # np.save('dist', np.array(d_l))
+                h10list.append(h10)
+                mrrlist.append(mrr)
+            # print(h10list)
+            # print(mrrlist)
+            if self.params.return_pred_res:
+                return {'mrr': mrr, 'h10': h10, 'apr':0, 'h10l': (all_rankings<=10).astype(int)}
+            else:
+                return {'mrr': np.array(mrrlist).mean(), 'h10': np.array(h10list).mean(), 'apr':0}
+                
+
+    def eval(self, rep=10, save=False):
+        rescollect = {}
+        for data in self.data_list:
+            print(data)
+            res = self.eval_data(data, rep, save)
+            for k in res:
+                if k not in rescollect:
+                    rescollect[k]=0
+                rescollect[k]+=res[k]
+        for k in rescollect:
+            rescollect[k] = rescollect[k]/len(self.data_list)
+        return rescollect

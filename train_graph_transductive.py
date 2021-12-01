@@ -208,9 +208,10 @@ if __name__ == '__main__':
         # val.save_dist()
     else:
         # val = TestSet(converted_triplets_ind, 'valid', params, adj_list_ind, ind_num_rel, ind_num_entities, neg_link_per_sample=50)
-        val = TestSet(converted_triplets_ind, 'valid', params, adj_list_ind, ind_num_rel, ind_num_entities, neg_link_per_sample=params.val_neg_sample_size, sample_method=params.eval_sample_method, mode='valid')
+        val_head = TestSet(converted_triplets_ind, 'valid', params, adj_list_ind, ind_num_rel, ind_num_entities, neg_link_per_sample=params.val_neg_sample_size, sample_method=sample_filtered_neg_tail, mode='valid')
+        val_tail = TestSet(converted_triplets_ind, 'valid', params, adj_list_ind, ind_num_rel, ind_num_entities, neg_link_per_sample=params.val_neg_sample_size, sample_method=sample_filtered_neg_head, mode='valid')
     params.train_edges = len(train)
-    params.val_size = len(val)
+    params.val_size = len(val_head)
     print(f'Training set has {params.train_edges} edges, Val set has {params.val_size} edges')
     params.inp_dim = train.n_feat_dim
     if params.use_neighbor_feature:
@@ -248,7 +249,7 @@ if __name__ == '__main__':
         res = []
         for i in range(params.reptition):
             graph_classifier = whole_dgl_model(params, params2, relation2id).to(device=params.device)
-            validator = EvaluatorVarLen(params, graph_classifier, val)
+            validator = EvaluatorVarLen(params, graph_classifier, [val_head,val_tail])
             trainer = Trainer(params, graph_classifier, train, state_dict=state_d, valid_evaluator=validator, label=i)
             res.append(trainer.train())
             val_list.append(validator)
@@ -256,14 +257,15 @@ if __name__ == '__main__':
         if params.save_res:
             np.save('log/'+params.prefix+'allres', np.array(res))
         print('after train evaluation:', params.prefix)
-        val = TestSet(converted_triplets_ind, 'test', params, adj_list_ind, ind_num_rel, ind_num_entities, neg_link_per_sample=params.val_neg_sample_size, sample_method=params.eval_sample_method, mode='valid')
+        val_head = TestSet(converted_triplets_ind, 'valid', params, adj_list_ind, ind_num_rel, ind_num_entities, neg_link_per_sample=params.val_neg_sample_size, sample_method=sample_filtered_neg_tail, mode='valid')
+        val_tail = TestSet(converted_triplets_ind, 'valid', params, adj_list_ind, ind_num_rel, ind_num_entities, neg_link_per_sample=params.val_neg_sample_size, sample_method=sample_filtered_neg_head, mode='valid')
         mrr = []
         h10 = []
         for i in range(params.reptition):
             graph_classifier = whole_dgl_model(params, params2, relation2id).to(device=params.device)
             state_d = torch.load(osp.join(params.root_path, "best_"+params.model_name+'_'+str(i)+".pth"), map_location=params.device)
             graph_classifier.load_state_dict(state_d['state_dict'])
-            validator = EvaluatorVarLen(params, graph_classifier, val)
+            validator = EvaluatorVarLen(params, graph_classifier, [val_head,val_tail])
             res = validator.eval(params.eval_rep)
             mrr.append(res['mrr'])
             h10.append(res['h10'])

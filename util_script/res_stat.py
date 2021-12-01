@@ -1,14 +1,16 @@
 import numpy as np
 
-h10_name = 'el2.npy'
+h10_name = 'ark.npy'
 
 dist_name = 'dist.npy'
 
 max_dist = 50
 
 h10 = np.load(h10_name)
+h10 = h10<=10
 nh10 = np.logical_not(h10)
 dist = np.load(dist_name)
+dist = dist[:int(len(dist)/10)]
 c_sample = len(h10)
 
 num_max_dist = np.sum(dist==max_dist)

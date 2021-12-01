@@ -12,6 +12,7 @@ from scipy.sparse import csr_matrix
 from torch.utils.data import Dataset
 from graph_util import  construct_graph_from_edges,subgraph_extraction_labeling_wiki, get_neighbor_nodes, extract_neighbor_nodes, sample_neg_link, construct_reverse_graph_from_edges
 from scipy.linalg import eig, eigh
+from util import SmartTimer
 
 # Disable
 def blockPrint():
@@ -340,7 +341,8 @@ class SubgraphDatasetOnlyLink(SubgraphDataset):
             a[:c]=a[c-1::-1]
             return a
         # np.put_along_axis(inter_count_head, dist[head_ind].reshape((-1,1))-1, d, axis=1)
-        inter_count_head[np.arange(len(inter_count_head)), (dist[head_ind]+1)%(self.params.shortest_path_dist+1)] = link_arr[head_ind,0]
+        if self.params.path_add_head:
+            inter_count_head[np.arange(len(inter_count_head)), (dist[head_ind]+1)%(self.params.shortest_path_dist+1)] = link_arr[head_ind,0]
         inter_count_head = np.apply_along_axis(swap_fun, 1, inter_count_head)
         # print('swap', time.time()-v)
         d = len(pred_mat_tail)
@@ -354,11 +356,16 @@ class SubgraphDatasetOnlyLink(SubgraphDataset):
             p = pred_mat_tail[p]
         # np.put_along_axis(inter_count_tail, dist[tail_ind].reshape((-1,1))-1, d, axis=1)
         # inter_count[np.arange(len(inter_count)), dist.astype(int)]=-1
-        inter_count_tail[np.arange(len(inter_count_tail)),  (dist[tail_ind]+1)%(self.params.shortest_path_dist+1)] = link_arr[tail_ind,0]
+        if self.params.path_add_head:
+            inter_count_tail[np.arange(len(inter_count_tail)),  (dist[tail_ind]+1)%(self.params.shortest_path_dist+1)] = link_arr[tail_ind,0]
         inter_count = np.zeros((len(links), self.params.shortest_path_dist+1), dtype=int)-1
         inter_count[head_ind] = inter_count_head
         inter_count[tail_ind] = inter_count_tail
         inter_count[inter_count==d] = -1
+        inter_count[dist==self.params.shortest_path_dist,0]=link_arr[dist==self.params.shortest_path_dist,0]
+        inter_count[dist==self.params.shortest_path_dist,1]=link_arr[dist==self.params.shortest_path_dist,1]
+        # inter_count[dist==self.params.shortest_path_dist,2]=link_arr[dist==self.params.shortest_path_dist,0]
+        # print(links)
         # print(dist)
         # print(inter_count)
         return links, dist.tolist(), inter_count.tolist()
@@ -379,7 +386,8 @@ class SubgraphDatasetOnlyLink(SubgraphDataset):
 
 
 class MultiSampleDataset(Dataset):
-    def __init__(self, triplets, dataset, params, adj_list, num_rels, num_entities, ratio=0.1, neg_link_per_sample=1, sample_method=sample_neg_link):
+    def __init__(self, triplets, dataset, params, adj_list, num_rels, num_entities, mode='train', ratio=0.1, neg_link_per_sample=1, sample_method=sample_neg_link):
+        self.mode = mode
         self.edges = triplets[dataset]
         self.adj_list = adj_list
         self.coo_adj_list = [adj.tocoo() for adj in self.adj_list]
@@ -393,12 +401,18 @@ class MultiSampleDataset(Dataset):
         self.graph = None
         self.adj_mat = None
         self.init_dim = 10
-        self.train_edges, self.graph_edges = self.regraph()
+        if self.mode=='train':
+            self.resample()
+        else:
+            self.train_edges = self.edges
+            self.graph_edges = triplets['train']
+        self.regraph()
         if params.use_random_labels:
             self.re_label()
         self.sample_links = sample_method
 
         self.neg_sample = neg_link_per_sample
+        self.timer = SmartTimer(False)
         self.__getitem__(142)
         self.n_feat_dim = self.graph.ndata['feat'].shape[1]
 
@@ -407,13 +421,16 @@ class MultiSampleDataset(Dataset):
         return self.num_train_edges
 
     def __getitem__(self, index):
+        self.timer.record()
         head, rel, tail = self.train_edges[index]
         neg_links = self.sample_links(self.coo_adj_list, rel, head, tail, self.num_nodes, self.neg_sample)
         pos_link = [head, rel, tail]
         links = [pos_link]+neg_links
         link_arr = np.array(links)
+        self.timer.cal_and_update('sample')
         dis_mat_head, pred_mat_head = ssp.csgraph.shortest_path(self.adj_mat, indices=head, directed=False, unweighted=True, return_predecessors=True)
         dis_mat_tail, pred_mat_tail = ssp.csgraph.shortest_path(self.adj_mat, indices=tail, directed=False, unweighted=True, return_predecessors=True)
+        self.timer.cal_and_update('ssp')
         d_head = np.clip(dis_mat_head, 1, self.params.shortest_path_dist)
         d_tail = np.clip(dis_mat_tail, 1, self.params.shortest_path_dist)
         dist = np.zeros(len(links), dtype=int)
@@ -421,15 +438,20 @@ class MultiSampleDataset(Dataset):
         tail_ind = link_arr[:,2]==tail
         dist[head_ind] = d_head[link_arr[head_ind, 2]]
         dist[tail_ind] = d_tail[link_arr[tail_ind, 0]]
+        dist_countdown = dist[head_ind]
         inter_count_head = np.zeros((np.sum(head_ind), self.params.shortest_path_dist+1), dtype=int)-1
         # pred_mat[0, np.arange(len(link_arr)), link_arr[:, 0]] = link_arr[:, 0]
         d = len(pred_mat_head)
+        self.timer.cal_and_update('prepare')
         pred_mat_head = np.concatenate([pred_mat_head, np.array([d])])
         pred_mat_head[pred_mat_head==-9999] = d
         p = pred_mat_head[link_arr[head_ind, 2]]
-        inter_count_head[:,0] = link_arr[head_ind,2]
+        # inter_count_head[:,0] = link_arr[head_ind,2]
+        inter_count_head[np.arange(len(inter_count_head)), dist_countdown] = link_arr[head_ind,2]
+        dist_countdown = np.clip(dist_countdown-1, 0, self.params.shortest_path_dist)
         for i in range(1,self.params.shortest_path_dist+1):
-            inter_count_head[:,i] = p
+            inter_count_head[np.arange(len(inter_count_head)),dist_countdown] = p
+            dist_countdown = np.clip(dist_countdown-1, 0, self.params.shortest_path_dist)
             p = pred_mat_head[p]
         def swap_fun(a):
             c = np.sum(a!=d)
@@ -438,8 +460,12 @@ class MultiSampleDataset(Dataset):
             a[:c]=a[c-1::-1]
             return a
         # np.put_along_axis(inter_count_head, dist[head_ind].reshape((-1,1))-1, d, axis=1)
-        # inter_count_head[np.arange(len(inter_count_head)), (dist[head_ind]+1)%(self.params.shortest_path_dist+1)] = link_arr[head_ind,0]
-        inter_count_head = np.apply_along_axis(swap_fun, 1, inter_count_head)
+        self.timer.cal_and_update('findheadpath')
+        # inter_count_head = np.apply_along_axis(swap_fun, 1, inter_count_head)
+        inter_count_head[:,0] = link_arr[head_ind, 0]
+        self.timer.cal_and_update('flipheadpath')
+        if self.params.path_add_head:
+            inter_count_head[np.arange(len(inter_count_head)), (dist[head_ind]+1)%(self.params.shortest_path_dist+1)] = link_arr[head_ind,0]
         # print('swap', time.time()-v)
         d = len(pred_mat_tail)
         inter_count_tail = np.zeros((np.sum(tail_ind), self.params.shortest_path_dist+1), dtype=int)-1
@@ -452,34 +478,39 @@ class MultiSampleDataset(Dataset):
             p = pred_mat_tail[p]
         # np.put_along_axis(inter_count_tail, dist[tail_ind].reshape((-1,1))-1, d, axis=1)
         # inter_count[np.arange(len(inter_count)), dist.astype(int)]=-1
-        # inter_count_tail[np.arange(len(inter_count_tail)),  (dist[tail_ind]+1)%(self.params.shortest_path_dist+1)] = link_arr[tail_ind,0]
+        self.timer.cal_and_update('findtailpath')
+        if self.params.path_add_head:
+            inter_count_tail[np.arange(len(inter_count_tail)),  (dist[tail_ind]+1)%(self.params.shortest_path_dist+1)] = link_arr[tail_ind,0]
         inter_count = np.zeros((len(links), self.params.shortest_path_dist+1), dtype=int)-1
         inter_count[head_ind] = inter_count_head
         inter_count[tail_ind] = inter_count_tail
         inter_count[inter_count==d] = -1
-        print(links)
-        print(dist)
-        print(inter_count)
+        inter_count[dist==self.params.shortest_path_dist]=-1
+        self.timer.cal_and_update('finish')
+        # inter_count[dist==self.params.shortest_path_dist,0]=link_arr[dist==self.params.shortest_path_dist,0]
+        # inter_count[dist==self.params.shortest_path_dist,1]=link_arr[dist==self.params.shortest_path_dist,1]
+        # inter_count[dist==self.params.shortest_path_dist,2]=link_arr[dist==self.params.shortest_path_dist,0]
+        # print(links)
+        # print(dist)
+        # print(inter_count[2])
         return links, dist.tolist(), inter_count.tolist()
 
-    def resample(self, ratio):
+    def resample(self):
         print("train graph resampled")
         perm = np.random.permutation(self.num_edges)
-        train_ind = int(self.num_edges*ratio)
-        train_edges = self.edges[perm[:train_ind]]
-        graph_edges = self.edges[perm[train_ind:]]
-
-        return train_edges, graph_edges
+        train_ind = int(self.num_edges*self.ratio)
+        self.train_edges = self.edges[perm[:train_ind]]
+        self.graph_edges = self.edges[perm[train_ind:]]
 
     def regraph(self):
-        train_edges, graph_edges = self.resample(self.ratio)
-        self.num_train_edges = len(train_edges)
-        self.num_graph_edges = len(graph_edges)
-        self.graph = construct_reverse_graph_from_edges(graph_edges.T, self.num_nodes, self.num_rels)
+        # train_edges, graph_edges = self.resample(self.ratio)
+        self.num_train_edges = len(self.train_edges)
+        self.num_graph_edges = len(self.graph_edges)
+        self.graph = construct_reverse_graph_from_edges(self.graph_edges.T, self.num_nodes, self.num_rels)
         self.adj_mat = self.graph.adjacency_matrix(transpose=False, scipy_fmt='csr')
         self.graph.ndata['feat'] = torch.ones([self.num_nodes, self.init_dim], dtype=torch.float32)
         self.graph.ndata['label'] = torch.ones([self.num_nodes, 1], dtype=torch.int64)
-        return train_edges, graph_edges
+        # return train_edges, graph_edges
         
     def re_label(self):
         # self.graph.ndata['label'][:, 0] = torch.randint(self.params.emb_dim, (1,self.graph.num_nodes()))

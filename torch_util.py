@@ -1,3 +1,4 @@
+import sys
 import torch
 import dgl
 import numpy as np
@@ -121,16 +122,42 @@ def collate_dgl_full(samples):
     return batched_graph, lks, dists
 
 
-def collate_dgl_onlylink(samples):
-    # The input `samples` is a list of pairs
-    d = map(list, zip(*samples))
-    ls = []
-    for d1 in d:
-        ls.append([item for sublist in d1 for item in sublist])
-    b_l = [len(l) for l in d1]
-    ls.append(b_l)
+class SCBatch:
+    def __init__(self, samples):
+        d = map(list, zip(*samples))
+        self.ls = []
+        for d1 in d:
+            p = [item for sublist in d1 for item in sublist]
+            p = torch.tensor(p,dtype=torch.long)
+            self.ls.append(p)
+        b_l = [len(l) for l in d1]
+        b_l = torch.tensor(b_l,dtype=torch.long)
+        self.ls.append(b_l)
 
-    return ls
+    def pin_memory(self):
+        for i in range(len(self.ls)):
+            self.ls[i] = self.ls[i].pin_memory()
+        return self
+
+
+def collate_dgl_onlylink(samples):
+    return SCBatch(samples)
+
+# def collate_dgl_onlylink(samples):
+#     # The input `samples` is a list of pairs
+#     # t = time.time()
+#     d = map(list, zip(*samples))
+#     ls = []
+#     for d1 in d:
+#         p = [item for sublist in d1 for item in sublist]
+#         p = torch.tensor(p,dtype=torch.long).pin_memory()
+#         ls.append(p)
+#     b_l = [len(l) for l in d1]
+#     b_l = torch.tensor(p,dtype=torch.long).pin_memory()
+#     ls.append(b_l)
+#     # print(time.time()-t)
+#     # sys.stdout.flush()
+#     return ls
 
 
 def move_batch_to_device_dgl_full(batch, device):
@@ -147,7 +174,7 @@ def move_batch_to_device_dgl_onlylink(batch,device):
     d = []
     # links, dists, mid_inds= batch
     for g in batch:
-        d.append(torch.LongTensor(g).to(device=device))
+        d.append(g.to(device=device))
     # links_device = torch.LongTensor(links).to(device=device)
     # dists_device = torch.LongTensor(dists).to(device=device)
 

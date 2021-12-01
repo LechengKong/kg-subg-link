@@ -5,7 +5,7 @@ import numpy as np
 
 base_dir = '/project/tantra/jerry.kong/ogb_project/ogb-grail-mod/data'
 
-file_path = "fb237_v3"
+file_path = "fb237_v1"
 
 output_path = file_path+"_resample"
 
@@ -26,7 +26,7 @@ edge_c = len(all_edges)
 perm = np.random.permutation(edge_c)
 
 test = 0
-valid = int(edge_c/10)*2
+valid = int(edge_c/10)*0
 
 test_edge = all_edges[perm[:test]]
 valid_edge = all_edges[perm[test:valid]]

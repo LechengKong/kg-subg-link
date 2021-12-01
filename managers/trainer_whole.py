@@ -12,13 +12,17 @@ from torch.utils.data import DataLoader, RandomSampler
 
 from sklearn import metrics
 
+from util import SmartTimer
+
 
 class Trainer():
-    def __init__(self, params, graph_classifier, train, state_dict=None, valid_evaluator=None):
+    def __init__(self, params, graph_classifier, train, state_dict=None, valid_evaluator=None, label=0):
         self.graph_classifier = graph_classifier
         self.valid_evaluator = valid_evaluator
         self.params = params
         self.train_data = train
+        self.label = label
+        self.timer = SmartTimer(False)
         # self.g = self.train_data.graph.to(params.device)
 
         model_params = list(self.graph_classifier.parameters())
@@ -58,22 +62,29 @@ class Trainer():
         all_labels = []
         all_scores = []
         result = None
-        # if self.params.multisample_dataset:
-        #     self.train_data.regraph()
-        dataloader = DataLoader(self.train_data, batch_size=self.params.batch_size,  num_workers=self.params.num_workers, collate_fn = self.params.collate_fn, shuffle=True)
-        # dataloader = DataLoader(self.train_data, batch_size=self.params.batch_size, num_workers=self.params.num_workers, collate_fn=self.params.collate_fn, prefetch_factor=self.params.prefetch_val, pin_memory=True, sampler =RandomSampler(self.train_data, num_samples=10, replacement=True))
+        if self.params.multisample_dataset and not self.params.no_regraph:
+            self.train_data.resample()
+            self.train_data.regraph()
+        # dataloader = DataLoader(self.train_data, batch_size=self.params.batch_size,  num_workers=self.params.num_workers, collate_fn = self.params.collate_fn, shuffle=True)
+        dataloader = DataLoader(self.train_data, batch_size=self.params.batch_size, num_workers=self.params.num_workers, collate_fn=self.params.collate_fn, sampler =RandomSampler(self.train_data, num_samples=int(self.train_data.num_edges/4), replacement=True))
         self.graph_classifier.train()
         pbar = tqdm(dataloader)
+        self.timer.record()
         for batch in pbar:
+            sp = batch.ls
+            self.timer.cal_and_update('data')
             if self.params.use_random_labels and self.params.batch_random:
                 self.train_data.re_label()
-            data = self.params.move_batch_to_device(batch, self.params.device)
+            self.timer.cal_and_update('relabel')
+            data = self.params.move_batch_to_device(sp, self.params.device)
+            self.timer.cal_and_update('move')
             self.optimizer.zero_grad()
             if self.params.only_link_sample:
                 g = self.train_data.graph.to(self.params.device)
                 scores, h_pred, t_pred, h_true, t_true = self.graph_classifier((g,(data[0],data[1],data[2])))
             else:
                 scores = self.graph_classifier(data)
+            self.timer.cal_and_update('model')
             scores_mat = scores.view(-1, self.params.train_neg_sample_size+1)
             score_pos = scores_mat[:,0]
             score_neg = scores_mat[:,1:]
@@ -81,12 +92,13 @@ class Trainer():
             if self.params.label_reg:
                 loss1 = self.criterion(score_pos.unsqueeze(1), score_neg, torch.Tensor([1]).to(device=self.params.device))
                 loss2 = self.mscriterion(h_pred, h_true) + self.mscriterion(t_pred, t_true)
-                loss = loss1+1*loss2
+                loss = loss1+2*loss2
             else:
                 loss = self.criterion(score_pos.unsqueeze(1), score_neg, torch.Tensor([1]).to(device=self.params.device))
             # loss = self.mscriterion(h_pred, h_true.view(-1)) + self.mscriterion(t_pred, t_true.view(-1))
             loss.backward()
             self.optimizer.step()
+            self.timer.cal_and_update('back')
             with torch.no_grad():
                 score_mat = scores_mat.cpu().numpy()
                 score_sort = np.argsort(score_mat, axis = 1)
@@ -95,12 +107,13 @@ class Trainer():
                 total_loss += loss.item()
                 if self.params.label_reg:
                     reg_loss += loss2.item()
+            self.timer.cal_and_update('mis')
                 
         self.updates_counter += 1
         if self.valid_evaluator and self.params.eval_every_iter and self.updates_counter % self.params.eval_every_iter == 0:
             # print('should eval')
             tic = time.time()
-            result = self.valid_evaluator.eval()
+            result = self.valid_evaluator.eval(self.params.eval_rep)
             print('\nPerformance:' + str(result) + 'in ' + str(time.time() - tic))
 
             if result['h10'] >= self.best_metric:
@@ -116,7 +129,7 @@ class Trainer():
             self.last_metric = result['h10']
 
         torch.cuda.empty_cache()
-        return total_loss/self.params.train_edges, reg_loss/self.params.train_edges, np.mean(1/np.array(all_rankings)), result
+        return total_loss/self.params.train_edges, reg_loss/self.params.train_edges, np.mean(1/np.array(all_rankings)), np.mean(np.array(all_rankings)<=10), result
 
     def train(self):
         self.reset_training_state()
@@ -124,19 +137,22 @@ class Trainer():
         for epoch in range(self.start_epoch+1, self.params.num_epochs + self.start_epoch + 1):
             self.epoch = epoch
             time_start = time.time()
-            loss, reg_loss, mrr, eval_result = self.train_epoch()
-            all_metric.append([])
-            all_metric[-1]+=[loss, reg_loss, mrr]
-            for v in eval_result.values():
-                all_metric[-1].append(v)
+            loss, reg_loss, mrr, h10, eval_result = self.train_epoch()
+            if eval_result is not None:
+                all_metric.append([])
+                all_metric[-1]+=[loss, reg_loss, mrr]
+                for v in eval_result.values():
+                    all_metric[-1].append(v)
             time_elapsed = time.time() - time_start
-            print(f'Epoch {epoch} with loss: {loss}, mrr:{mrr}, reg_loss:{reg_loss}, best VAL mrr: {self.best_metric} in {time_elapsed}')
+            print(f'Epoch {epoch} with loss: {loss}, mrr:{mrr}, h10:{h10}, reg_loss:{reg_loss}, best VAL mrr: {self.best_metric} in {time_elapsed}')
             if not self.should_train:
                 break
-            if epoch % self.params.save_every == 0:
-                torch.save({'epoch': self.epoch, 'state_dict': self.graph_classifier.state_dict(), 'optimizer': self.optimizer.state_dict()}, os.path.join(self.params.root_path, self.params.model_name+'.pth'))
-        # np.save(self.params.res_save_name, np.array(all_metric))
+            if epoch % self.params.save_every == 0 and self.params.save_res:
+                torch.save({'epoch': self.epoch, 'state_dict': self.graph_classifier.state_dict(), 'optimizer': self.optimizer.state_dict()}, os.path.join(self.params.root_path, self.params.model_name+'_'+str(self.label)+'.pth'))
+        return np.array(all_metric)
+        # np.save('lstmmetric', np.array(all_metric))
 
     def save_classifier(self):
-        torch.save({'epoch': self.epoch, 'state_dict': self.graph_classifier.state_dict(), 'optimizer': self.optimizer.state_dict()}, os.path.join(self.params.root_path, 'best_'+self.params.model_name+'.pth'))
-        logging.info('Better models found w.r.t accuracy. Saved it!')
+        if self.params.save_res:
+            torch.save({'epoch': self.epoch, 'state_dict': self.graph_classifier.state_dict(), 'optimizer': self.optimizer.state_dict()}, os.path.join(self.params.root_path, 'best_'+self.params.model_name+'_'+str(self.label)+'.pth'))
+            logging.info('Better models found w.r.t accuracy. Saved it!')
