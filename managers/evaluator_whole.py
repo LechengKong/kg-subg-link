@@ -130,20 +130,11 @@ class EvaluatorVarLen():
                     data = self.params.move_batch_to_device(sp, self.params.device)
                     self.timer.cal_and_update('move')
                     d_l.append(data[1].cpu().numpy())
-                    # print(d_l[-1])
-                    if self.params.only_link_sample:
-                        # g = self.data.graph.to(self.params.device)
-                        # score_pos = self.graph_classifier((g,data))
-                        score_pos,h_pred, t_pred, h_true, t_true = self.graph_classifier.mlp_update(g, data[0], data[1],data[2],h)
-                        # print(torch.sum((h_pred[0]-h_true[0])**2).item())
-                        # print('hp',h_pred[0])
-                        # print('ht',h_true[0])
-                    else:
-                        score_pos = self.graph_classifier(data)
+                    score_pos,h_pred, t_pred, h_true, t_true = self.graph_classifier.mlp_update(g, data[0], data[1],data[2],h)
                     self.timer.cal_and_update('model')
                     scores = score_pos.cpu().numpy().flatten()
                     self.timer.cal_and_update('scdetach')
-                    batch_len = data[3].cpu().numpy()
+                    batch_len = data[4].cpu().numpy()
                     self.timer.cal_and_update('detach')
                     cur_head_pointer = 0
                     for bl in batch_len:
@@ -172,7 +163,6 @@ class EvaluatorVarLen():
     def eval(self, rep=10, save=False):
         rescollect = {}
         for data in self.data_list:
-            print(data)
             res = self.eval_data(data, rep, save)
             for k in res:
                 if k not in rescollect:

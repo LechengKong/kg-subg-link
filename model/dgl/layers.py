@@ -123,7 +123,7 @@ class RGCNBasisLayer(RGCNLayer):
 
         def msg_func(edges):
             w = weight.index_select(0, edges.data['type'])
-            msg = edges.data['w'] * torch.bmm(edges.src[input_].unsqueeze(1), w).squeeze(1)
+            msg = edges.data['mask']*edges.data['w'] * torch.bmm(edges.src[input_].unsqueeze(1), w).squeeze(1)
             curr_emb = torch.mm(edges.dst[input_], self.self_loop_weight)  # (B, F)
 
             if self.has_attn:

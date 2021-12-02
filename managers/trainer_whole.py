@@ -62,11 +62,11 @@ class Trainer():
         all_labels = []
         all_scores = []
         result = None
-        if self.params.multisample_dataset and not self.params.no_regraph:
+        if self.params.regraph:
             self.train_data.resample()
             self.train_data.regraph()
         # dataloader = DataLoader(self.train_data, batch_size=self.params.batch_size,  num_workers=self.params.num_workers, collate_fn = self.params.collate_fn, shuffle=True)
-        dataloader = DataLoader(self.train_data, batch_size=self.params.batch_size, num_workers=self.params.num_workers, collate_fn=self.params.collate_fn, sampler =RandomSampler(self.train_data, num_samples=int(self.train_data.num_edges/4), replacement=True))
+        dataloader = DataLoader(self.train_data, batch_size=self.params.batch_size, num_workers=self.params.num_workers, collate_fn=self.params.collate_fn, sampler =RandomSampler(self.train_data, num_samples=10, replacement=True))
         self.graph_classifier.train()
         pbar = tqdm(dataloader)
         self.timer.record()
@@ -79,11 +79,9 @@ class Trainer():
             data = self.params.move_batch_to_device(sp, self.params.device)
             self.timer.cal_and_update('move')
             self.optimizer.zero_grad()
-            if self.params.only_link_sample:
-                g = self.train_data.graph.to(self.params.device)
-                scores, h_pred, t_pred, h_true, t_true = self.graph_classifier((g,(data[0],data[1],data[2])))
-            else:
-                scores = self.graph_classifier(data)
+            g = self.train_data.graph.to(self.params.device)
+            g.edata['mask'][data[3]]=0
+            scores, h_pred, t_pred, h_true, t_true = self.graph_classifier((g,(data[0],data[1],data[2])))
             self.timer.cal_and_update('model')
             scores_mat = scores.view(-1, self.params.train_neg_sample_size+1)
             score_pos = scores_mat[:,0]

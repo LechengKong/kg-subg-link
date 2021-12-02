@@ -126,12 +126,15 @@ class SCBatch:
     def __init__(self, samples):
         d = map(list, zip(*samples))
         self.ls = []
+        f = True
         for d1 in d:
+            if f:
+                b_l = [len(l) for l in d1]
+                b_l = torch.tensor(b_l,dtype=torch.long)
+                f= False
             p = [item for sublist in d1 for item in sublist]
             p = torch.tensor(p,dtype=torch.long)
             self.ls.append(p)
-        b_l = [len(l) for l in d1]
-        b_l = torch.tensor(b_l,dtype=torch.long)
         self.ls.append(b_l)
 
     def pin_memory(self):
@@ -142,22 +145,6 @@ class SCBatch:
 
 def collate_dgl_onlylink(samples):
     return SCBatch(samples)
-
-# def collate_dgl_onlylink(samples):
-#     # The input `samples` is a list of pairs
-#     # t = time.time()
-#     d = map(list, zip(*samples))
-#     ls = []
-#     for d1 in d:
-#         p = [item for sublist in d1 for item in sublist]
-#         p = torch.tensor(p,dtype=torch.long).pin_memory()
-#         ls.append(p)
-#     b_l = [len(l) for l in d1]
-#     b_l = torch.tensor(p,dtype=torch.long).pin_memory()
-#     ls.append(b_l)
-#     # print(time.time()-t)
-#     # sys.stdout.flush()
-#     return ls
 
 
 def move_batch_to_device_dgl_full(batch, device):
@@ -202,19 +189,5 @@ def seed_worker(worker_id):
 
 
 def set_data_passing(params):
-    if params.use_spe:
-        params.collate_fn = collate_dgl_spe
-        params.collate_fn_val = collate_dgl_val_spe
-        params.move_batch_to_device = move_batch_to_device_dgl_spe
-        params.move_batch_to_device_val = move_batch_to_device_dgl_val_spe
-    elif params.whole_graph:
-        params.collate_fn = collate_dgl_full
-        params.move_batch_to_device = move_batch_to_device_dgl_full
-    elif params.only_link_sample:
-        params.collate_fn = collate_dgl_onlylink
-        params.move_batch_to_device = move_batch_to_device_dgl_onlylink
-    else:
-        params.collate_fn = collate_dgl
-        params.collate_fn_val = collate_dgl_val
-        params.move_batch_to_device = move_batch_to_device_dgl
-        params.move_batch_to_device_val = move_batch_to_device_dgl_val
+    params.collate_fn = collate_dgl_onlylink
+    params.move_batch_to_device = move_batch_to_device_dgl_onlylink

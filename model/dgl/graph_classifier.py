@@ -102,11 +102,10 @@ class FCLayers(nn.Module):
 
 
 class GraphClassifierWhole(nn.Module):
-    def __init__(self, params, g_params, relation2id):  # in_dim, h_dim, rel_emb_dim, out_dim, num_rels, num_bases):
+    def __init__(self, params, relation2id):  # in_dim, h_dim, rel_emb_dim, out_dim, num_rels, num_bases):
         super().__init__()
 
         self.params = params
-        self.g_params = g_params
         self.relation2id = relation2id
 
         self.gnn = RGCN(params)  # in_dim, h_dim, h_dim, num_rels, num_bases)
@@ -126,7 +125,7 @@ class GraphClassifierWhole(nn.Module):
         else:
             mid_dim = self.param_set_dim
 
-        self.link_fc = FCLayers(3, dim_base_count * self.param_set_dim + self.params.rel_emb_dim * 1 + self.params.emb_dim*self.params.use_root_dist+2*self.params.inp_dim*self.params.concat_init_feat+2*self.params.inp_dim*self.params.use_label_pred_out+mid_dim*self.params.use_mid_repr, [64, 32, 1])
+        self.link_fc = FCLayers(3, dim_base_count * self.param_set_dim + self.params.rel_emb_dim * 1 +2*self.params.inp_dim*self.params.concat_init_feat+mid_dim*self.params.use_mid_repr, [64, 32, 1])
 
         self.head_fc = FCLayers(1, mid_dim+self.params.emb_dim, [self.params.inp_dim])
         self.tail_fc = FCLayers(1, mid_dim+self.params.emb_dim, [self.params.inp_dim])
@@ -185,18 +184,10 @@ class GraphClassifierWhole(nn.Module):
         if self.params.use_mid_repr:
             g_rep = torch.cat([g_rep, mid_repr],dim=1)
         
-        if self.params.use_root_dist:
-            g_rep = torch.cat([g_rep, dist_repr],dim=1)
-        
         if self.params.concat_init_feat:
             g_rep = torch.cat([g_rep,
                             g.ndata['feat'][links[:,0]],
                             g.ndata['feat'][links[:,2]]], dim=1)
-        
-        if self.params.use_label_pred_out:
-            g_rep = torch.cat([g_rep,
-                            head_pred,
-                            tail_pred], dim=1)
         output = self.link_fc(g_rep)
 
         return output, head_pred, tail_pred, head_init_feat, tail_init_feat

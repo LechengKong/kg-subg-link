@@ -62,6 +62,7 @@ def construct_graph_from_edges(edges, n_entities):
 def construct_reverse_graph_from_edges(edges, n_entities, num_rel):
     g = dgl.graph((np.concatenate((edges[0],edges[2])), np.concatenate((edges[2],edges[0]))), num_nodes=n_entities)
     g.edata['type'] = torch.tensor(np.concatenate((edges[1],edges[1]+num_rel)), dtype=torch.int32)
+    g.edata['mask'] = torch.tensor(np.ones((len(edges[0])*2,1)), dtype=torch.int32)
     return g
 
 # def extract_neighbor_nodes(roots, adj, h=1, max_nodes_per_hop=None, median_mult=50000, inc_size=0):
