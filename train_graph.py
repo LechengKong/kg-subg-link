@@ -1,19 +1,24 @@
+from dgl.transform import reverse
 import torch
 import random
 import argparse
 import numpy as np
 import os.path as osp
 import logging
+import dgl
+import scipy.io as io
 
 from data_util import process_files
 from datasets import SubgraphDatasetWhole, SubgraphDatasetOnlyLink, MultiSampleDataset, FullGraphDataset
 from torch_util import set_data_passing
 from model.dgl.graph_classifier import GraphClassifier as dgl_model
-from model.dgl.graph_classifier import GraphClassifierSpe as spe_dgl_model
-from model.dgl.graph_classifier import GraphClassifierWhole as whole_dgl_model
-from managers.trainer_whole import Trainer
-from managers.evaluator_whole import Evaluator, EvaluatorVarLen
+from model.dgl.graph_classifier import GraphClassifierMulti as multi_dgl_model
+from model.dgl.graph_classifier import GraphClassifierWhole as single_dgl_model
+from managers.trainer_whole import Trainer as TrainerHeterogeneous
+from managers.trainer_homogeneous import Trainer as TrainerHomogeneous
+from managers.evaluator_whole import EvaluatorVarLen, EvaluatorVarLenHomogeneous
 from graph_util import *
+from scipy.sparse import csr_matrix, tril
 
 
 if __name__ == '__main__':
@@ -25,7 +30,9 @@ if __name__ == '__main__':
     parser.add_argument("--data_set", type=str, default="fb237_v1")
     parser.add_argument("--ind_data_set", type=str, default="fb237_v1_ind")
     parser.add_argument("--transductive", type=bool, default=False)
+    parser.add_argument("--homogeneous", type=bool, default=False)
 
+    parser.add_argument("--use_multi_model", type=bool, default=False)
     parser.add_argument("--rel_emb_dim", type=int, default=64)
     parser.add_argument("--emb_dim", type=int, default=64)
     parser.add_argument("--attn_rel_emb_dim", type=int, default=64)
@@ -56,6 +63,9 @@ if __name__ == '__main__':
     parser.add_argument("--val_neg_sample_size",type=int, default=50)
     parser.add_argument("--regraph", type=bool, default=False)
     parser.add_argument("--sample_graph_ratio", type=float, default=0.5)
+    parser.add_argument("--edge_rep", type=int, default=4)
+    parser.add_argument("--edge_split", type=float, default=2)
+    parser.add_argument("--edges_division", type=int, default=10)
 
     parser.add_argument("--retrain", type=bool, default=False)
     parser.add_argument("--retrain_seed", type=int, default=100)
@@ -66,7 +76,8 @@ if __name__ == '__main__':
 
     parser.add_argument("--shortest_path_dist", type=int, default=30)
     parser.add_argument("--use_deep_set", type=bool, default=False)
-    parser.add_argument("--concat_init_feat", type=bool, default=True)
+    parser.add_argument("--deep_set_dim", type=int, default=1024)
+    parser.add_argument("--concat_init_feat", type=bool, default=False)
     parser.add_argument("--add_ht_emb", type=bool, default=True)
     parser.add_argument("--use_random_labels", type=bool, default=False)
     parser.add_argument("--batch_random", type=bool, default=False)
@@ -74,11 +85,12 @@ if __name__ == '__main__':
     parser.add_argument("--path_add_head", type=bool, default=False)
     parser.add_argument("--use_lstm", type=bool, default=False)
     parser.add_argument("--use_mid_repr", type=bool, default=True)
+    parser.add_argument("--use_dist_emb", type=bool, default=False)
 
     parser.add_argument("--gpuid", type=int, default=0)
     params = parser.parse_args()
     params.max_label_value=10
-    params.prefix = ("rand_" if params.use_random_labels else "")+("batchr_" if params.batch_random else "")+("reg_" if params.label_reg else "")+("addhead_" if params.path_add_head else "")+("lstm_" if params.use_lstm else "")+("regraph_" if params.regraph else "") +params.ind_data_set+"_"
+    params.prefix = ("lstm_" if params.use_lstm else "")+("deepset_" if params.use_deep_set else "")+("multi_"+str(params.edge_split)+"_" if params.use_multi_model else "") +params.ind_data_set+"_"
     params.model_name = params.prefix+"gnn"
     print(params.prefix)
     if params.retrain:
@@ -86,14 +98,14 @@ if __name__ == '__main__':
         torch.manual_seed(params.retrain_seed)
         random.seed(params.retrain_seed)
         np.random.seed(params.retrain_seed)
-    # elif not params.eval:
-    #     torch.manual_seed(11)
-    #     random.seed(11)
-    #     np.random.seed(11)
-    elif not params.eval:
-        torch.manual_seed(7)
-        random.seed(7)
-        np.random.seed(7)
+    elif not params.eval or params.homogeneous:
+        torch.manual_seed(101)
+        random.seed(101)
+        np.random.seed(101)
+    # else:
+    #     torch.manual_seed(100)
+    #     random.seed(100)
+    #     np.random.seed(100)
 
     if torch.cuda.is_available():
         params.device = torch.device('cuda:'+str(params.gpuid))
@@ -102,44 +114,112 @@ if __name__ == '__main__':
 
     logging.basicConfig(level=logging.INFO)
 
-    database_path = osp.join(params.data_path, params.data_set)
-    files = {}
-    use_data = ["train", "test", "valid"]
-    for f in use_data:
-        files[f] = osp.join(database_path,f'{f}.txt')
+    if params.homogeneous:
+        if params.data_set == 'celegan':
+            data = np.genfromtxt(osp.join(params.data_path,'celegan.txt'), delimiter=',')
+            data = data.astype(int)
+            train_num_entities = np.max(data)+1
+            ind_num_entities = train_num_entities
+            head, tail = data[:,0], data[:,1]
+        elif params.data_set == 'pb':
+            data = np.genfromtxt(osp.join(params.data_path,'pb.txt'), delimiter=',')
+            data = data.astype(int)
+            train_num_entities = np.max(data)+1
+            ind_num_entities = train_num_entities
+            head, tail = data[:,0], data[:,1]
+        else:
+            Amat = io.loadmat(osp.join(params.data_path,params.data_set+'.mat'))['net']
+            train_num_entities = Amat.shape[0]
+            ind_num_entities = train_num_entities
+            edge_mat = tril(Amat)
+            head, tail = edge_mat.nonzero()
+        train_num_rel = 1
+        ind_num_rel = 1
+        relation2id = None
+        k = np.ones((train_num_entities,train_num_entities))
+        k[head,tail]=0
+        k[tail,head]=0
+        nh,nt = k.nonzero()
+        neg_perm = np.random.permutation(len(nt))
+        perm = np.random.permutation(len(head))
+        train_ind = int(len(perm)*0.8)
+        test_ind = int(len(perm)*0.9)
+        new_mat = np.zeros((len(head),3),dtype=int)
+        new_mat[:,0] = head
+        new_mat[:,2] = tail
+        neg_mat = np.zeros((len(head),3), dtype=int)
+        neg_mat[:,0] = nh[neg_perm[:len(head)]]
+        neg_mat[:,2] = nt[neg_perm[:len(head)]]
+        converted_triplets = {"train":new_mat[perm[:train_ind]], "train_neg":neg_mat[perm[:train_ind]], "test":new_mat[perm[train_ind:test_ind]],"test_neg":neg_mat[perm[train_ind:test_ind]], "valid":new_mat[perm[test_ind:]], "valid_neg":neg_mat[perm[test_ind:]]}
+        converted_triplets_ind = converted_triplets
+        rel_mat = converted_triplets['train']
+        adj_list = [csr_matrix((np.ones(len(rel_mat)),(rel_mat[:,0],rel_mat[:,1])), shape=(train_num_entities,train_num_entities))]
+        adj_list_ind = adj_list
+        params.num_rels = train_num_rel
+        params.aug_num_rels = train_num_rel
+    else:
+        database_path = osp.join(params.data_path, params.data_set)
+        files = {}
+        use_data = ["train", "test", "valid"]
+        for f in use_data:
+            files[f] = osp.join(database_path,f'{f}.txt')
 
-    adj_list, converted_triplets, entity2id, relation2id, id2entity, id2relation = process_files(files)
-    # print(relation2id)
-    train_num_entities = len(entity2id)
-    train_num_rel = len(relation2id)
-    params.num_rels = train_num_rel
-    params.aug_num_rels = train_num_rel*2
+        adj_list, converted_triplets, entity2id, relation2id, id2entity, id2relation = process_files(files)
+        # print(relation2id)
+        train_num_entities = len(entity2id)
+        train_num_rel = len(relation2id)
+
+        ind_database_path = osp.join(params.data_path, params.ind_data_set)
+        files = {}
+        for f in use_data:
+            files[f] = osp.join(ind_database_path,f'{f}.txt')
+
+        adj_list_ind, converted_triplets_ind, entity2id_ind, relation2id_ind, id2entity_ind, id2relation_ind = process_files(files, relation2id=relation2id)
+        
+        ind_num_entities = len(entity2id_ind)
+        ind_num_rel = len(relation2id_ind)
+        params.num_rels = train_num_rel
+        params.aug_num_rels = train_num_rel*2
     print(f'Dataset {params.data_set} has {train_num_entities} entities and {train_num_rel} relations')
-
-    ind_database_path = osp.join(params.data_path, params.ind_data_set)
-    files = {}
-    for f in use_data:
-        files[f] = osp.join(ind_database_path,f'{f}.txt')
-
-    adj_list_ind, converted_triplets_ind, entity2id_ind, relation2id_ind, id2entity_ind, id2relation_ind = process_files(files, relation2id=relation2id)
-    
-    ind_num_entities = len(entity2id_ind)
-    ind_num_rel = len(relation2id_ind)
     print(f'Dataset {params.ind_data_set} has {ind_num_entities} entities and {ind_num_rel} relations')
     set_data_passing(params)
     torch.multiprocessing.set_sharing_strategy('file_system')
 
-    TrainSet = FullGraphDataset
-    TestSet = FullGraphDataset
+    if params.homogeneous:
+        TrainSet = SubgraphDatasetOnlyLink
+        TestSet = SubgraphDatasetOnlyLink
+    else:
+        TrainSet = FullGraphDataset
+        TestSet = FullGraphDataset
 
     # train = TrainSet(converted_triplets, 'train', params, adj_list, train_num_rel, train_num_entities, ratio=params.sample_graph_ratio, neg_link_per_sample=params.train_neg_sample_size)
-    train = TrainSet(converted_triplets, 'train', params, adj_list, train_num_rel, train_num_entities, neg_link_per_sample=params.train_neg_sample_size, ratio=params.sample_graph_ratio)
+    if not params.homogeneous:
+        train = TrainSet(converted_triplets, 'train', params, adj_list, train_num_rel, train_num_entities, neg_link_per_sample=params.train_neg_sample_size, ratio=params.sample_graph_ratio)
+    else:
+        train = TrainSet(converted_triplets, 'train', params, adj_list, train_num_rel, train_num_entities, neg_link_per_sample=params.train_neg_sample_size,sample_method=sample_arb_neg, mode='train')
+        params.train_neg_sample_size = 1
+    t_data = converted_triplets['train']
+    perm = np.random.permutation(len(t_data))
+    train_ind = int(len(perm)*0.95)
+    g_edge = t_data[perm[:train_ind]]
+    t_edge = t_data[perm[train_ind:]]
+    p_alledge = {}
+    p_alledge['train']=g_edge
+    p_alledge['valid']=t_edge
     if params.transductive:
-        test =[TestSet(converted_triplets_ind, 'test', params, adj_list_ind, ind_num_rel, ind_num_entities, neg_link_per_sample=params.val_neg_sample_size, sample_method=sample_filtered_neg_tail, mode='valid'), TestSet(converted_triplets_ind, 'test', params, adj_list_ind, ind_num_rel, ind_num_entities, neg_link_per_sample=params.val_neg_sample_size, sample_method=sample_filtered_neg_head, mode='valid')]
-        val = [TestSet(converted_triplets_ind, 'valid', params, adj_list_ind, ind_num_rel, ind_num_entities, neg_link_per_sample=params.val_neg_sample_size, sample_method=sample_filtered_neg_tail, mode='valid'),TestSet(converted_triplets_ind, 'valid', params, adj_list_ind, ind_num_rel, ind_num_entities, neg_link_per_sample=params.val_neg_sample_size, sample_method=sample_filtered_neg_head, mode='valid')]
+        if params.homogeneous:
+            test =[TestSet(converted_triplets_ind, 'test', params, adj_list_ind, ind_num_rel, ind_num_entities, neg_link_per_sample=params.val_neg_sample_size, sample_method=sample_arb_neg)]
+            val = [TestSet(converted_triplets_ind, 'valid', params, adj_list_ind, ind_num_rel, ind_num_entities, neg_link_per_sample=params.val_neg_sample_size, sample_method=sample_arb_neg)]
+            inval = [TestSet(converted_triplets_ind, 'train', params, adj_list_ind, train_num_rel, train_num_entities, neg_link_per_sample=params.val_neg_sample_size, sample_method=sample_arb_neg)]
+            # inval = [TestSet(p_alledge, 'valid', params, adj_list, train_num_rel, train_num_entities, neg_link_per_sample=params.val_neg_sample_size, sample_method=sample_arb_neg)]
+        else:
+            test =[TestSet(converted_triplets_ind, 'test', params, adj_list_ind, ind_num_rel, ind_num_entities, neg_link_per_sample=params.val_neg_sample_size, sample_method=sample_filtered_neg_tail, mode='valid'), TestSet(converted_triplets_ind, 'test', params, adj_list_ind, ind_num_rel, ind_num_entities, neg_link_per_sample=params.val_neg_sample_size, sample_method=sample_filtered_neg_head, mode='valid')]
+            val = [TestSet(converted_triplets_ind, 'valid', params, adj_list_ind, ind_num_rel, ind_num_entities, neg_link_per_sample=params.val_neg_sample_size, sample_method=sample_filtered_neg_tail, mode='valid'),TestSet(converted_triplets_ind, 'valid', params, adj_list_ind, ind_num_rel, ind_num_entities, neg_link_per_sample=params.val_neg_sample_size, sample_method=sample_filtered_neg_head, mode='valid')]
+            inval = [TestSet(p_alledge, 'valid', params, adj_list, train_num_rel, train_num_entities, neg_link_per_sample=params.val_neg_sample_size, sample_method=sample_filtered_neg_tail, mode='valid'),TestSet(p_alledge, 'valid', params, adj_list, train_num_rel, train_num_entities, neg_link_per_sample=params.val_neg_sample_size, sample_method=sample_filtered_neg_head, mode='valid')]
     else:
         test = [TestSet(converted_triplets_ind, 'test', params, adj_list_ind, ind_num_rel, ind_num_entities, neg_link_per_sample=params.val_neg_sample_size, sample_method=sample_neg_link, mode='valid')]
         val = [TestSet(converted_triplets, 'valid', params, adj_list, train_num_rel, train_num_entities, neg_link_per_sample=params.val_neg_sample_size, sample_method=sample_neg_link, mode='valid')]
+        inval = [TestSet(p_alledge, 'valid', params, adj_list, train_num_rel, train_num_entities, neg_link_per_sample=params.val_neg_sample_size, sample_method=sample_neg_link, mode='valid')]
     params.train_edges = len(train)
     params.val_size = len(val[0])
     print(f'Training set has {params.train_edges} edges, Val set has {params.val_size} edges')
@@ -149,28 +229,49 @@ if __name__ == '__main__':
     if params.retrain:
         state_d = torch.load(osp.join(params.root_path, params.model_name+"_0.pth"), map_location=params.device)
 
+    if params.use_multi_model:
+        whole_dgl_model = multi_dgl_model
+    else:
+        whole_dgl_model = single_dgl_model
+
+    if params.homogeneous:
+        Trainer = TrainerHomogeneous
+        Evaluator = EvaluatorVarLenHomogeneous
+    else:
+        Trainer = TrainerHeterogeneous
+        Evaluator = EvaluatorVarLen
+
     if params.eval:
-        mrr = []
-        h10 = []
+        eval_metric = ['mrr','h10','h1','auc','ap']
+        res_col = {}
+        in_res_col = {}
+        for n in eval_metric:
+            res_col[n] = []
+            in_res_col[n] = []
         for i in range(params.reptition):
             graph_classifier = whole_dgl_model(params, relation2id).to(device=params.device)
             state_d = torch.load(osp.join(params.root_path, "best_"+params.model_name+'_'+str(i)+".pth"), map_location=params.device)
             graph_classifier.load_state_dict(state_d['state_dict'])
-            validator = EvaluatorVarLen(params, graph_classifier, test)
+            validator = Evaluator(params, graph_classifier, test)
+            # invalidator = EvaluatorVarLen(params, graph_classifier, inval)
             res = validator.eval(params.eval_rep)
-            mrr.append(res['mrr'])
-            h10.append(res['h10'])
-        mrr = np.array(mrr)
-        h10 = np.array(h10)
-        print(mrr, np.mean(mrr), np.std(mrr))
-        print(h10, np.mean(h10), np.std(h10))
+            # inres = invalidator.eval(params.eval_rep)
+            for n in eval_metric:
+                res_col[n].append(res[n])
+                # in_res_col[n].append(inres[n])
+        for n in eval_metric:
+            f = np.array(res_col[n])
+            print(n, f, np.mean(f), np.std(f))
+        # for n in eval_metric:
+        #     f = np.array(in_res_col[n])
+        #     print('in',n, f, np.mean(f), np.std(f))
     else:
         val_list = []
         train_list = []
         res = []
         for i in range(params.reptition):
             graph_classifier = whole_dgl_model(params, relation2id).to(device=params.device)
-            validator = EvaluatorVarLen(params, graph_classifier, val)
+            validator = Evaluator(params, graph_classifier, val)
             trainer = Trainer(params, graph_classifier, train, state_dict=state_d, valid_evaluator=validator, label=i)
             res.append(trainer.train())
             val_list.append(validator)
@@ -180,15 +281,25 @@ if __name__ == '__main__':
         print('after train evaluation:', params.prefix)
         mrr = []
         h10 = []
+        h1 = []
+        inmrr = []
+        inh10 = []
+        inh1 = []
         for i in range(params.reptition):
             graph_classifier = whole_dgl_model(params, relation2id).to(device=params.device)
             state_d = torch.load(osp.join(params.root_path, "best_"+params.model_name+'_'+str(i)+".pth"), map_location=params.device)
             graph_classifier.load_state_dict(state_d['state_dict'])
-            validator = EvaluatorVarLen(params, graph_classifier, test)
+            validator = Evaluator(params, graph_classifier, test)
+            invalidator = Evaluator(params, graph_classifier, inval)
             res = validator.eval(params.eval_rep)
+            inres = invalidator.eval(params.eval_rep)
             mrr.append(res['mrr'])
             h10.append(res['h10'])
-        mrr = np.array(mrr)
-        h10 = np.array(h10)
-        print(mrr, np.mean(mrr), np.std(mrr))
-        print(h10, np.mean(h10), np.std(h10))
+            h1.append(res['h1'])
+            inmrr.append(inres['mrr'])
+            inh10.append(inres['h10'])
+            inh1.append(inres['h1'])
+        res_col = [mrr,h10,h1,inmrr,inh10,inh1]
+        for d in res_col:
+            f = np.array(d)
+            print(f, np.mean(f), np.std(f))

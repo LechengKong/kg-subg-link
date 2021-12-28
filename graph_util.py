@@ -12,7 +12,9 @@ def sample_neg_link(adj, rel, head, tail, num_nodes, sample_size):
     neg_tail_neighbor = cur_adj.row[cur_adj.col==tail]
     cans = set(arr)
     tail_cans = cans.difference(neg_head_neighbor)
+    tail_cans.discard(head)
     head_cans = cans.difference(neg_tail_neighbor)
+    head_cans.discard(tail)
     tail_can_arr = np.array(list(tail_cans))
     head_can_arr = np.array(list(head_cans))
     # print(type(tail_can_arr))
@@ -33,6 +35,7 @@ def sample_filtered_neg_tail(adj, rel, head, tail, num_nodes, sample_size):
     cans = set(arr)
     cans.difference_update(neg_head_neighbor)
     cans.discard(tail)
+    cans.discard(head)
     tail_can_list = list(cans)
     neg_tail_links = [[head, rel, neg_tail] for neg_tail in tail_can_list]
     return neg_tail_links
@@ -44,10 +47,22 @@ def sample_filtered_neg_head(adj, rel, head, tail, num_nodes, sample_size):
     cans = set(arr)
     cans.difference_update(neg_tail_neighbor)
     cans.discard(head)
+    cans.discard(tail)
     head_can_list = list(cans)
     neg_head_links = [[neg_head, rel, tail] for neg_head in head_can_list]
     return neg_head_links
 
+def sample_arb_neg(adj, rel, head, tail, num_nodes, sample_size):
+    head = np.random.randint(num_nodes)
+    arr = np.arange(num_nodes)
+    cur_adj = adj[rel]
+    neg_head_neighbor = cur_adj.col[cur_adj.row==head]
+    cans = set(arr)
+    cans.difference_update(neg_head_neighbor)
+    cans.discard(head)
+    tail_can_list = list(cans)
+    tail_ind = np.random.randint(len(tail_can_list))
+    return [[head,rel,tail_can_list[tail_ind]]]
 
 def remove_nodes(A_incidence, nodes):
     idxs_wo_nodes = list(set(range(A_incidence.shape[1])) - set(nodes))
@@ -57,6 +72,13 @@ def remove_nodes(A_incidence, nodes):
 def construct_graph_from_edges(edges, n_entities):
     g = dgl.graph((edges[0], edges[2]), num_nodes=n_entities)
     g.edata['type'] = torch.tensor(edges[1], dtype=torch.int32)
+    g.edata['mask'] = torch.tensor(np.ones((len(edges[0]),1)), dtype=torch.int32)
+    return g
+
+def construct_homogeneous_graph_from_edges(edges, n_entities):
+    g = dgl.graph((np.concatenate((edges[0],edges[2])), np.concatenate((edges[2],edges[0]))), num_nodes=n_entities)
+    g.edata['type'] = torch.tensor(np.concatenate((edges[1],edges[1])), dtype=torch.int32)
+    g.edata['mask'] = torch.tensor(np.ones((len(edges[0])*2,1)), dtype=torch.int32)
     return g
 
 def construct_reverse_graph_from_edges(edges, n_entities, num_rel):

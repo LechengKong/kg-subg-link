@@ -100,7 +100,7 @@ class RGCN(nn.Module):
                          edge_dropout=self.edge_dropout,
                          has_attn=self.has_attn)
 
-    def forward(self, g):
+    def forward(self, g, fixed_dropout_edges=None):
         for layer in self.layers:
-            layer(g, self.attn_rel_emb)
+            layer(g, self.attn_rel_emb, fixed_dropout_edges)
         return g.ndata.pop('h')

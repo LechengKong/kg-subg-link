@@ -7,10 +7,12 @@ dist_name = 'dist.npy'
 max_dist = 50
 
 h10 = np.load(h10_name)
-h10 = h10<=10
+# print(h10)
+h10 = h10==1
 nh10 = np.logical_not(h10)
 dist = np.load(dist_name)
-dist = dist[:int(len(dist)/10)]
+dist = dist[:len(h10)]
+# print(dist)
 c_sample = len(h10)
 
 num_max_dist = np.sum(dist==max_dist)

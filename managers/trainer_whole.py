@@ -65,11 +65,12 @@ class Trainer():
         if self.params.regraph:
             self.train_data.resample()
             self.train_data.regraph()
-        # dataloader = DataLoader(self.train_data, batch_size=self.params.batch_size,  num_workers=self.params.num_workers, collate_fn = self.params.collate_fn, shuffle=True)
-        dataloader = DataLoader(self.train_data, batch_size=self.params.batch_size, num_workers=self.params.num_workers, collate_fn=self.params.collate_fn, sampler =RandomSampler(self.train_data, num_samples=10, replacement=True))
+        dataloader = DataLoader(self.train_data, batch_size=self.params.batch_size,  num_workers=self.params.num_workers, collate_fn = self.params.collate_fn, shuffle=True)
+        # dataloader = DataLoader(self.train_data, batch_size=self.params.batch_size, num_workers=self.params.num_workers, collate_fn=self.params.collate_fn, sampler =RandomSampler(self.train_data, num_samples=10, replacement=True))
         self.graph_classifier.train()
         pbar = tqdm(dataloader)
         self.timer.record()
+        # with torch.autograd.detect_anomaly():
         for batch in pbar:
             sp = batch.ls
             self.timer.cal_and_update('data')
@@ -81,7 +82,7 @@ class Trainer():
             self.optimizer.zero_grad()
             g = self.train_data.graph.to(self.params.device)
             g.edata['mask'][data[3]]=0
-            scores, h_pred, t_pred, h_true, t_true = self.graph_classifier((g,(data[0],data[1],data[2])))
+            scores, h_pred, t_pred, h_true, t_true = self.graph_classifier((g,(data[0],data[1],data[2],data[4])))
             self.timer.cal_and_update('model')
             scores_mat = scores.view(-1, self.params.train_neg_sample_size+1)
             score_pos = scores_mat[:,0]
@@ -93,6 +94,13 @@ class Trainer():
                 loss = loss1+2*loss2
             else:
                 loss = self.criterion(score_pos.unsqueeze(1), score_neg, torch.Tensor([1]).to(device=self.params.device))
+                # exp_score = torch.exp(0.5*score_neg)
+                # assert torch.isnan(exp_score).sum().item() == 0
+                # print(score_neg[1])
+                # print(exp_score[1])
+                # weight = exp_score/(exp_score.sum(dim=1)).unsqueeze(1)
+                # assert torch.isnan(weight).sum().item() == 0
+                # loss = (-torch.log(torch.sigmoid(score_pos))-(weight*torch.log(1-torch.sigmoid(score_neg))).sum(dim=1)).sum()
             # loss = self.mscriterion(h_pred, h_true.view(-1)) + self.mscriterion(t_pred, t_true.view(-1))
             loss.backward()
             self.optimizer.step()
@@ -114,9 +122,9 @@ class Trainer():
             result = self.valid_evaluator.eval(self.params.eval_rep)
             print('\nPerformance:' + str(result) + 'in ' + str(time.time() - tic))
 
-            if result['h10'] >= self.best_metric:
+            if result['mrr'] >= self.best_metric:
                 self.save_classifier()
-                self.best_metric = result['h10']
+                self.best_metric = result['mrr']
                 self.not_improved_count = 0
 
             else:
@@ -124,10 +132,10 @@ class Trainer():
                 if self.not_improved_count > self.params.early_stop:
                     logging.info(f"Validation performance didn\'t improve for {self.params.early_stop} epochs. Training stops.")
                     self.should_train = False
-            self.last_metric = result['h10']
+            self.last_metric = result['mrr']
 
         torch.cuda.empty_cache()
-        return total_loss/self.params.train_edges, reg_loss/self.params.train_edges, np.mean(1/np.array(all_rankings)), np.mean(np.array(all_rankings)<=10), result
+        return total_loss/self.params.train_edges, reg_loss/self.params.train_edges, np.mean(1/np.array(all_rankings)), np.mean(np.array(all_rankings)<=10), np.mean(np.array(all_rankings)==1), result
 
     def train(self):
         self.reset_training_state()
@@ -135,14 +143,14 @@ class Trainer():
         for epoch in range(self.start_epoch+1, self.params.num_epochs + self.start_epoch + 1):
             self.epoch = epoch
             time_start = time.time()
-            loss, reg_loss, mrr, h10, eval_result = self.train_epoch()
+            loss, reg_loss, mrr, h10, h1, eval_result = self.train_epoch()
             if eval_result is not None:
                 all_metric.append([])
                 all_metric[-1]+=[loss, reg_loss, mrr]
                 for v in eval_result.values():
                     all_metric[-1].append(v)
             time_elapsed = time.time() - time_start
-            print(f'Epoch {epoch} with loss: {loss}, mrr:{mrr}, h10:{h10}, reg_loss:{reg_loss}, best VAL mrr: {self.best_metric} in {time_elapsed}')
+            print(f'Epoch {epoch} with loss: {loss}, mrr:{mrr}, h10:{h10}, h1:{h1}, reg_loss:{reg_loss}, best VAL mrr: {self.best_metric} in {time_elapsed}')
             if not self.should_train:
                 break
             if epoch % self.params.save_every == 0 and self.params.save_res:

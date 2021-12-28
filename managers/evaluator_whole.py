@@ -120,21 +120,26 @@ class EvaluatorVarLen():
             pbar = tqdm(dataloader)
             d_l = []
             h10list = []
+            h1list = []
             mrrlist = []
+            auclist = []
+            aplist = []
             for i in range(rep):
                 all_rankings = []
+                all_scores = []
+                all_target = []
                 self.timer.record()
                 for b_num, batch in enumerate(pbar):
                     self.timer.cal_and_update('data')
                     sp = batch.ls
                     data = self.params.move_batch_to_device(sp, self.params.device)
                     self.timer.cal_and_update('move')
-                    d_l.append(data[1].cpu().numpy())
-                    score_pos,h_pred, t_pred, h_true, t_true = self.graph_classifier.mlp_update(g, data[0], data[1],data[2],h)
+                    d_l.append(data[1][0].item())
+                    score_pos,h_pred, t_pred, h_true, t_true = self.graph_classifier.mlp_update(g, data[0], data[1],data[2], data[4],h)
                     self.timer.cal_and_update('model')
                     scores = score_pos.cpu().numpy().flatten()
                     self.timer.cal_and_update('scdetach')
-                    batch_len = data[4].cpu().numpy()
+                    batch_len = data[5].cpu().numpy()
                     self.timer.cal_and_update('detach')
                     cur_head_pointer = 0
                     for bl in batch_len:
@@ -143,27 +148,130 @@ class EvaluatorVarLen():
                         cur_head_pointer = next_hp
                         order = np.argsort(b_score)
                         all_rankings.append(len(order)-np.where(order==0)[0][0])
+                    all_scores += scores.tolist()
+                    t = np.zeros(len(scores), dtype=int)
+                    t[0] = 1
+                    t[batch_len[:-1]]=1
+                    all_target+=t.tolist()
                     self.timer.cal_and_update('mis')
                 all_rankings = np.array(all_rankings)
                 # print(all_rankings)
                 np.save('ark',all_rankings)
                 h10 = np.mean(all_rankings<=10)
+                h1 = np.mean(all_rankings==1)
                 mrr = np.mean(1/all_rankings)
-                # np.save('dist', np.array(d_l))
+                auc = metrics.roc_auc_score(all_target, all_scores)
+                ap = metrics.average_precision_score(all_target, all_scores)
+                np.save('dist', np.array(d_l))
                 h10list.append(h10)
                 mrrlist.append(mrr)
+                h1list.append(h1)
+                auclist.append(auc)
+                aplist.append(ap)
             # print(h10list)
             # print(mrrlist)
             if self.params.return_pred_res:
                 return {'mrr': mrr, 'h10': h10, 'apr':0, 'h10l': (all_rankings<=10).astype(int)}
             else:
-                return {'mrr': np.array(mrrlist).mean(), 'h10': np.array(h10list).mean(), 'apr':0}
+                return {'mrr': np.array(mrrlist).mean(), 'h10': np.array(h10list).mean(), 'h1': np.array(h1list).mean(), 'auc':np.array(auclist).mean(), 'ap':np.array(aplist).mean(), 'apr':0}
                 
 
     def eval(self, rep=10, save=False):
         rescollect = {}
         for data in self.data_list:
             res = self.eval_data(data, rep, save)
+            for k in res:
+                if k not in rescollect:
+                    rescollect[k]=0
+                rescollect[k]+=res[k]
+        for k in rescollect:
+            rescollect[k] = rescollect[k]/len(self.data_list)
+        return rescollect
+
+
+class EvaluatorVarLenHomogeneous():
+    def __init__(self, params, graph_classifier, data_list):
+        self.params = params
+        self.graph_classifier = graph_classifier
+        self.data_list = data_list
+        self.timer = SmartTimer(False)
+        # self.g = self.data.graph.to(params.device)
+
+    def eval_data(self, data, rep=10, save=False):
+        # print("eval")
+        if self.params.use_random_labels:
+            data.re_label()
+        dataloader = DataLoader(data, batch_size=self.params.val_batch_size, num_workers=self.params.num_workers, collate_fn=self.params.collate_fn, prefetch_factor=2, pin_memory=True)
+        # dataloader = DataLoader(self.data, batch_size=self.params.val_batch_size, num_workers=self.params.num_workers, collate_fn=self.params.collate_fn, sampler =RandomSampler(self.data, replacement=True,num_samples=10))
+        # sampler = RandomSampler(self.data, num_samples=10)
+        self.graph_classifier.eval()
+        with torch.no_grad():
+            g = data.graph.to(self.params.device)
+            h = self.graph_classifier.graph_update(g)
+            pbar = tqdm(dataloader)
+            d_l = []
+            h10list = []
+            h1list = []
+            mrrlist = []
+            auclist = []
+            aplist = []
+            for i in range(rep):
+                all_rankings = []
+                all_scores = []
+                all_target = []
+                self.timer.record()
+                for b_num, batch in enumerate(pbar):
+                    self.timer.cal_and_update('data')
+                    sp = batch.ls
+                    data = self.params.move_batch_to_device(sp, self.params.device)
+                    self.timer.cal_and_update('move')
+                    d_l.append(data[1][0].item())
+                    score_pos,h_pred, t_pred, h_true, t_true = self.graph_classifier.mlp_update(g, data[0], data[1],data[2], data[4],h)
+                    self.timer.cal_and_update('model')
+                    scores = score_pos.cpu().numpy().flatten()
+                    scores = scores[::2] + scores[1::2]
+                    self.timer.cal_and_update('scdetach')
+                    batch_len = (data[5].cpu().numpy()/2).astype(int)
+                    self.timer.cal_and_update('detach')
+                    cur_head_pointer = 0
+                    for bl in batch_len:
+                        next_hp = cur_head_pointer+bl
+                        b_score = scores[cur_head_pointer:next_hp]
+                        cur_head_pointer = next_hp
+                        order = np.argsort(b_score)
+                        all_rankings.append(len(order)-np.where(order==0)[0][0])
+                    all_scores += scores.tolist()
+                    t = np.zeros(len(scores), dtype=int)
+                    t[0] = 1
+                    t[batch_len[:-1]]=1
+                    all_target+=t.tolist()
+                    self.timer.cal_and_update('mis')
+                all_rankings = np.array(all_rankings)
+                # print(all_rankings)
+                np.save('ark',all_rankings)
+                h10 = np.mean(all_rankings<=10)
+                h1 = np.mean(all_rankings==1)
+                mrr = np.mean(1/all_rankings)
+                auc = metrics.roc_auc_score(all_target, all_scores)
+                ap = metrics.average_precision_score(all_target, all_scores)
+                np.save('dist', np.array(d_l))
+                h10list.append(h10)
+                mrrlist.append(mrr)
+                h1list.append(h1)
+                auclist.append(auc)
+                aplist.append(ap)
+            # print(h10list)
+            # print(mrrlist)
+            if self.params.return_pred_res:
+                return {'mrr': mrr, 'h10': h10, 'apr':0, 'h10l': (all_rankings<=10).astype(int)}
+            else:
+                return {'mrr': np.array(mrrlist).mean(), 'h10': np.array(h10list).mean(), 'h1': np.array(h1list).mean(), 'auc':np.array(auclist).mean(), 'ap':np.array(aplist).mean(), 'apr':0}
+                
+
+    def eval(self, rep=10, save=False):
+        rescollect = {}
+        for data in self.data_list:
+            res = self.eval_data(data, 1, save)
             for k in res:
                 if k not in rescollect:
                     rescollect[k]=0
