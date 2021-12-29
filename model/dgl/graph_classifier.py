@@ -131,7 +131,7 @@ class GraphClassifierWhole(nn.Module):
         self.head_fc = FCLayers(1, mid_dim+self.params.emb_dim, [self.params.inp_dim])
         self.tail_fc = FCLayers(1, mid_dim+self.params.emb_dim, [self.params.inp_dim])
         if self.params.use_deep_set:
-            self.deep_set = FCLayers(2, self.param_set_dim, [int(self.params.deep_set_dim/2),self.params.deep_set_dim])
+            self.deep_set = FCLayers(3, self.param_set_dim, [self.params.deep_set_dim, self.params.deep_set_dim, self.params.deep_set_dim])
 
         if self.params.use_lstm:
             self.RNN = LSTM(self.param_set_dim, hidden_size=self.params.lstm_hidden_size, bidirectional=True, batch_first=True)
@@ -160,10 +160,10 @@ class GraphClassifierWhole(nn.Module):
             mid_repr = mid_repr[:,0,:]
         else:
             if self.params.use_deep_set:
-                mid_repr = self.deep_set(mid_repr).sum(dim=1)
+                mid_repr = (self.deep_set(mid_repr)*torch.sign(inter_count+1).unsqueeze(2)).sum(dim=1)
             else:
                 mid_repr = mid_repr.sum(dim=1)
-            mid_repr = mid_repr/torch.clamp(torch.sum(inter_count!=-1,dim=1),min=1).unsqueeze(1)
+            # mid_repr = mid_repr/torch.clamp(torch.sum(inter_count!=-1,dim=1),min=1).unsqueeze(1)
             # mid_repr = (g.ndata['repr'].view(-1,self.param_set_dim)[torch.abs(inter_count)]*torch.sign(inter_count+1).unsqueeze(2))
         # print(mid_repr.size())
         dist_repr = self.dist_emb(dist)
