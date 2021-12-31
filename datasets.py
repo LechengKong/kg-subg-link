@@ -541,7 +541,7 @@ class FullGraphDataset(Dataset):
             self.re_label()
         self.sample_links = sample_method
 
-        self.neg_sample = neg_link_per_sample
+        self.neg_sample = None if self.mode!='train' and self.params.transductive else neg_link_per_sample
         self.timer = SmartTimer(False)
         self.__getitem__(0)
         self.n_feat_dim = self.graph.ndata['feat'].shape[1]
@@ -642,7 +642,7 @@ class FullGraphDataset(Dataset):
         if self.mode=='train' and len(edges)==1:
             self.adj_mat[head,tail]=1
             self.adj_mat[tail,head]=1
-        return links, dist.tolist(), inter_count.tolist(), [index, index+self.num_edges], edge_ids_org.tolist()
+        return links, dist.tolist(), inter_count.tolist(), [index, index+self.num_edges], edge_ids_org.tolist(), head_ind.tolist(), tail_ind.tolist()
 
     def resample(self):
         print("train graph resampled")

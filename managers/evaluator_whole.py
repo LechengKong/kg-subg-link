@@ -143,7 +143,7 @@ class EvaluatorVarLen():
                     self.timer.cal_and_update('model')
                     scores = score_pos.cpu().numpy().flatten()
                     self.timer.cal_and_update('scdetach')
-                    batch_len = data[5].cpu().numpy()
+                    batch_len = data[-1].cpu().numpy()
                     self.timer.cal_and_update('detach')
                     cur_head_pointer = 0
                     for bl in batch_len:

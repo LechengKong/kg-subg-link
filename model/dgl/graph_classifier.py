@@ -111,7 +111,7 @@ class GraphClassifierWhole(nn.Module):
 
         self.gnn = RGCN(params)  # in_dim, h_dim, h_dim, num_rels, num_bases)
 
-        self.rel_emb = nn.Embedding(self.params.num_rels, self.params.rel_emb_dim, sparse=False)
+        self.rel_emb = nn.Embedding(self.params.aug_num_rels, self.params.rel_emb_dim, sparse=False)
 
         self.dist_emb = nn.Embedding(self.params.shortest_path_dist+1, self.params.emb_dim, sparse=False)
 

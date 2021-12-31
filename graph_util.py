@@ -6,6 +6,7 @@ import random
 
 
 def sample_neg_link(adj, rel, head, tail, num_nodes, sample_size):
+    # sample_size = int(sample_size/2)
     arr = np.arange(num_nodes)
     cur_adj = adj[rel]
     neg_head_neighbor = cur_adj.col[cur_adj.row==head]
@@ -24,7 +25,7 @@ def sample_neg_link(adj, rel, head, tail, num_nodes, sample_size):
     neg_tail_links = [[head, rel, neg_tail] for neg_tail in tail_sample]
     neg_head_links = [[neg_head, rel, tail] for neg_head in head_sample]
     neg_links = neg_tail_links+neg_head_links
-    neg_links = random.choices(neg_links, k=sample_size)
+    # neg_links = random.choices(neg_links, k=sample_size)
     return neg_links
 
 
@@ -38,6 +39,8 @@ def sample_filtered_neg_tail(adj, rel, head, tail, num_nodes, sample_size):
     cans.discard(head)
     tail_can_list = list(cans)
     neg_tail_links = [[head, rel, neg_tail] for neg_tail in tail_can_list]
+    if sample_size is not None:
+        neg_tail_links = random.choices(neg_tail_links, k=sample_size)
     return neg_tail_links
 
 def sample_filtered_neg_head(adj, rel, head, tail, num_nodes, sample_size):
@@ -50,6 +53,8 @@ def sample_filtered_neg_head(adj, rel, head, tail, num_nodes, sample_size):
     cans.discard(tail)
     head_can_list = list(cans)
     neg_head_links = [[neg_head, rel, tail] for neg_head in head_can_list]
+    if sample_size is not None:
+        neg_head_links = random.choices(neg_head_links, k=sample_size)
     return neg_head_links
 
 def sample_arb_neg(adj, rel, head, tail, num_nodes, sample_size):
