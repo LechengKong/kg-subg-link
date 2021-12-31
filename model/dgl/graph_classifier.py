@@ -197,6 +197,50 @@ class GraphClassifierWhole(nn.Module):
         output = self.link_fc(g_rep)
 
         return output, head_pred, tail_pred, head_init_feat, tail_init_feat
+    
+    def mlp_update_repr(self, repr, g, links, dist, inter_count, edge_ids, h):
+        head_repr = g.ndata['repr'][links[:,0]]
+
+        tail_repr = g.ndata['repr'][links[:,2]]
+        rel_repr = self.rel_emb(links[:,1])
+        mid_repr = repr[torch.abs(inter_count)]*torch.sign(inter_count+1).unsqueeze(2)
+        # print(edge_ids)
+        # edge_repr = self.rel_emb(g.edata['type'][torch.abs(edge_ids)]%self.params.num_rels)*torch.sign(edge_ids+1).unsqueeze(2)
+        # mid_repr = torch.cat([mid_repr,edge_repr],dim=-1)
+        if self.params.use_lstm:
+            mid_repr, (_,_) = self.RNN(mid_repr)
+            mid_repr = mid_repr[:,0,:]
+        else:
+            mid_repr = mid_repr.sum(dim=1)
+            # mid_repr = mid_repr/torch.clamp(torch.sum(inter_count!=-1,dim=1),min=1).unsqueeze(1)
+            # mid_repr = (g.ndata['repr'].view(-1,self.param_set_dim)[torch.abs(inter_count)]*torch.sign(inter_count+1).unsqueeze(2))
+        # print(mid_repr.size())
+        # dist_repr = self.dist_emb(dist)
+        
+        head_pred = None
+        tail_pred = None
+        head_init_feat = None
+        tail_init_feat = None
+
+        g_rep = torch.cat([head_repr.view(-1, self.param_set_dim),
+                            tail_repr.view(-1, self.param_set_dim),
+                            rel_repr], dim=1)
+        
+        if self.params.use_mid_repr:
+            g_rep = torch.cat([g_rep, mid_repr],dim=1)
+        
+        if self.params.use_dist_emb:
+            g_rep = torch.cat([g_rep,
+                            dist.unsqueeze(1)], dim=1)
+        output = self.link_fc(g_rep)
+
+        return output, head_pred, tail_pred, head_init_feat, tail_init_feat
+
+    def convert_mid_repr(self, g):
+        repr = g.ndata['repr'].view(-1,self.param_set_dim)
+        if self.params.use_deep_set:
+            repr = self.deep_set(repr)
+        return repr
 
 
 class GraphClassifierMulti(nn.Module):

@@ -65,8 +65,8 @@ class Trainer():
         if self.params.regraph:
             self.train_data.resample()
             self.train_data.regraph()
-        dataloader = DataLoader(self.train_data, batch_size=self.params.batch_size,  num_workers=self.params.num_workers, collate_fn = self.params.collate_fn, shuffle=True)
-        # dataloader = DataLoader(self.train_data, batch_size=self.params.batch_size, num_workers=self.params.num_workers, collate_fn=self.params.collate_fn, sampler =RandomSampler(self.train_data, num_samples=10, replacement=True))
+        # dataloader = DataLoader(self.train_data, batch_size=self.params.batch_size,  num_workers=self.params.num_workers, collate_fn = self.params.collate_fn, shuffle=True)
+        dataloader = DataLoader(self.train_data, batch_size=self.params.batch_size, num_workers=self.params.num_workers, collate_fn=self.params.collate_fn, sampler =RandomSampler(self.train_data, num_samples=10, replacement=True))
         self.graph_classifier.train()
         pbar = tqdm(dataloader)
         self.timer.record()
@@ -85,6 +85,7 @@ class Trainer():
             scores, h_pred, t_pred, h_true, t_true = self.graph_classifier((g,(data[0],data[1],data[2],data[4])))
             self.timer.cal_and_update('model')
             scores_mat = scores.view(-1, self.params.train_neg_sample_size+1)
+            # scores_mat = torch.clamp(scores_mat, -, 64)
             score_pos = scores_mat[:,0]
             score_neg = scores_mat[:,1:]
             # max_score_neg, _ = score_neg.max(dim=1)
@@ -93,6 +94,9 @@ class Trainer():
                 loss2 = self.mscriterion(h_pred, h_true) + self.mscriterion(t_pred, t_true)
                 loss = loss1+2*loss2
             else:
+                # weight = torch.exp(0.3*score_neg)
+                # weight = weight/weight.sum(dim=-1).unsqueeze(1)
+                # loss = torch.mean(-torch.log(torch.sigmoid(score_pos)+0.000001)-(weight*torch.log(1-torch.sigmoid(score_neg)+0.000001)).sum(dim=-1))
                 loss = self.criterion(score_pos.unsqueeze(1), score_neg, torch.Tensor([1]).to(device=self.params.device))
                 # exp_score = torch.exp(0.5*score_neg)
                 # assert torch.isnan(exp_score).sum().item() == 0

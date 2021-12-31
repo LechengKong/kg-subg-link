@@ -33,12 +33,12 @@ if __name__ == '__main__':
     parser.add_argument("--homogeneous", type=bool, default=False)
 
     parser.add_argument("--use_multi_model", type=bool, default=False)
-    parser.add_argument("--rel_emb_dim", type=int, default=64)
-    parser.add_argument("--emb_dim", type=int, default=64)
-    parser.add_argument("--attn_rel_emb_dim", type=int, default=64)
-    parser.add_argument("--lstm_hidden_size", type=int, default=64)
+    parser.add_argument("--rel_emb_dim", type=int, default=32)
+    parser.add_argument("--emb_dim", type=int, default=32)
+    parser.add_argument("--attn_rel_emb_dim", type=int, default=32)
+    parser.add_argument("--lstm_hidden_size", type=int, default=32)
     parser.add_argument("--num_gcn_layers", type=int, default=6)
-    parser.add_argument("--num_bases",type=int, default=4)
+    parser.add_argument("--num_bases",type=int, default=2)
     parser.add_argument("--dropout",type=float,default=0)
     parser.add_argument("--edge_dropout",type=float,default=0.5)
     parser.add_argument("--has_attn", type=bool, default=False)
@@ -51,7 +51,7 @@ if __name__ == '__main__':
     parser.add_argument("--val_batch_size", type=int, default=1)
     parser.add_argument("--margin",type=float, default=15)
 
-    parser.add_argument("--num_workers",type=int, default=16)
+    parser.add_argument("--num_workers",type=int, default=8)
     parser.add_argument("--prefetch_val", type=int, default=2)
     parser.add_argument("--save_every",type=int, default=1)
     parser.add_argument("--eval_every_iter",type=int, default=1)
@@ -74,7 +74,7 @@ if __name__ == '__main__':
     parser.add_argument("--eval", type=bool, default=False)
     parser.add_argument("--eval_rep", type=int, default=10)
 
-    parser.add_argument("--shortest_path_dist", type=int, default=30)
+    parser.add_argument("--shortest_path_dist", type=int, default=15)
     parser.add_argument("--use_deep_set", type=bool, default=False)
     parser.add_argument("--deep_set_dim", type=int, default=1024)
     parser.add_argument("--concat_init_feat", type=bool, default=False)
@@ -193,12 +193,22 @@ if __name__ == '__main__':
         TestSet = FullGraphDataset
 
     # train = TrainSet(converted_triplets, 'train', params, adj_list, train_num_rel, train_num_entities, ratio=params.sample_graph_ratio, neg_link_per_sample=params.train_neg_sample_size)
-    if not params.homogeneous:
-        train = TrainSet(converted_triplets, 'train', params, adj_list, train_num_rel, train_num_entities, neg_link_per_sample=params.train_neg_sample_size, ratio=params.sample_graph_ratio)
-    else:
-        train = TrainSet(converted_triplets, 'train', params, adj_list, train_num_rel, train_num_entities, neg_link_per_sample=params.train_neg_sample_size,sample_method=sample_arb_neg, mode='train')
-        params.train_neg_sample_size = 1
-    t_data = converted_triplets['train']
+    # if not params.transductive:
+    #     t_data = converted_triplets['train']
+    #     perm = np.random.permutation(len(t_data))
+    #     train_ind = int(len(perm)*0.7)
+    #     train_triplets = {}
+    #     train_triplets['valid'] = converted_triplets['valid']
+    #     train_triplets['test'] = converted_triplets['test']
+    #     train_triplets['train'] = t_data[perm[:train_ind]]
+    #     val_triplets = {}
+    #     val_triplets['valid'] = converted_triplets['valid']
+    #     val_triplets['test'] = converted_triplets['test']
+    #     val_triplets['train'] = t_data[perm[train_ind:]]
+    # else:
+    train_triplets = converted_triplets
+    val_triplets = converted_triplets
+    t_data = train_triplets['train']
     perm = np.random.permutation(len(t_data))
     train_ind = int(len(perm)*0.95)
     g_edge = t_data[perm[:train_ind]]
@@ -206,6 +216,11 @@ if __name__ == '__main__':
     p_alledge = {}
     p_alledge['train']=g_edge
     p_alledge['valid']=t_edge
+    if not params.homogeneous:
+        train = TrainSet(train_triplets, 'train', params, adj_list, train_num_rel, train_num_entities, neg_link_per_sample=params.train_neg_sample_size, ratio=params.sample_graph_ratio)
+    else:
+        train = TrainSet(train_triplets, 'train', params, adj_list, train_num_rel, train_num_entities, neg_link_per_sample=params.train_neg_sample_size,sample_method=sample_arb_neg, mode='train')
+        params.train_neg_sample_size = 1
     if params.transductive:
         if params.homogeneous:
             test =[TestSet(converted_triplets_ind, 'test', params, adj_list_ind, ind_num_rel, ind_num_entities, neg_link_per_sample=params.val_neg_sample_size, sample_method=sample_arb_neg)]
@@ -218,7 +233,8 @@ if __name__ == '__main__':
             inval = [TestSet(p_alledge, 'valid', params, adj_list, train_num_rel, train_num_entities, neg_link_per_sample=params.val_neg_sample_size, sample_method=sample_filtered_neg_tail, mode='valid'),TestSet(p_alledge, 'valid', params, adj_list, train_num_rel, train_num_entities, neg_link_per_sample=params.val_neg_sample_size, sample_method=sample_filtered_neg_head, mode='valid')]
     else:
         test = [TestSet(converted_triplets_ind, 'test', params, adj_list_ind, ind_num_rel, ind_num_entities, neg_link_per_sample=params.val_neg_sample_size, sample_method=sample_neg_link, mode='valid')]
-        val = [TestSet(converted_triplets, 'valid', params, adj_list, train_num_rel, train_num_entities, neg_link_per_sample=params.val_neg_sample_size, sample_method=sample_neg_link, mode='valid')]
+        # test = [TestSet(converted_triplets, 'test', params, adj_list, train_num_rel, train_num_entities, neg_link_per_sample=params.val_neg_sample_size, sample_method=sample_neg_link, mode='valid')]
+        val = [TestSet(val_triplets, 'valid', params, adj_list, train_num_rel, train_num_entities, neg_link_per_sample=params.val_neg_sample_size, sample_method=sample_neg_link, mode='valid')]
         inval = [TestSet(p_alledge, 'valid', params, adj_list, train_num_rel, train_num_entities, neg_link_per_sample=params.val_neg_sample_size, sample_method=sample_neg_link, mode='valid')]
     params.train_edges = len(train)
     params.val_size = len(val[0])

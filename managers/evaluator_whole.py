@@ -117,8 +117,10 @@ class EvaluatorVarLen():
         with torch.no_grad():
             g = data.graph.to(self.params.device)
             h = self.graph_classifier.graph_update(g)
+            repr = self.graph_classifier.convert_mid_repr(g)
             pbar = tqdm(dataloader)
             d_l = []
+            c_l = []
             h10list = []
             h1list = []
             mrrlist = []
@@ -134,8 +136,10 @@ class EvaluatorVarLen():
                     sp = batch.ls
                     data = self.params.move_batch_to_device(sp, self.params.device)
                     self.timer.cal_and_update('move')
+                    # print(data[1][0].item())
                     d_l.append(data[1][0].item())
-                    score_pos,h_pred, t_pred, h_true, t_true = self.graph_classifier.mlp_update(g, data[0], data[1],data[2], data[4],h)
+                    c_l.append(torch.sum(data[1]==1).item())
+                    score_pos,h_pred, t_pred, h_true, t_true = self.graph_classifier.mlp_update_repr(repr, g, data[0], data[1],data[2], data[4],h)
                     self.timer.cal_and_update('model')
                     scores = score_pos.cpu().numpy().flatten()
                     self.timer.cal_and_update('scdetach')
@@ -160,9 +164,12 @@ class EvaluatorVarLen():
                 h10 = np.mean(all_rankings<=10)
                 h1 = np.mean(all_rankings==1)
                 mrr = np.mean(1/all_rankings)
-                auc = metrics.roc_auc_score(all_target, all_scores)
-                ap = metrics.average_precision_score(all_target, all_scores)
+                # auc = metrics.roc_auc_score(all_target, all_scores)
+                # ap = metrics.average_precision_score(all_target, all_scores)
+                auc=0
+                ap=0
                 np.save('dist', np.array(d_l))
+                np.save('onedist', np.array(c_l))
                 h10list.append(h10)
                 mrrlist.append(mrr)
                 h1list.append(h1)
